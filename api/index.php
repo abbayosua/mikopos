@@ -17,7 +17,6 @@ $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 ini_set('display_errors', '0');
-header('Content-Type: application/json');
 
 // Handle CORS / preflight
 if ($method === 'OPTIONS') {
@@ -289,13 +288,66 @@ try {
         Response::success($s);
     }
 
-    // 404
+    // === PAGE ROUTES (HTML) ===
+    elseif ($method === 'GET' && !str_starts_with($uri, '/api/')) {
+        header('Content-Type: text/html; charset=UTF-8');
+
+        $pages = [
+            '/login'    => 'auth/login',
+            '/register' => 'auth/register',
+            '/'         => 'dashboard/index',
+            '/pos'      => 'pos/index',
+            '/products' => 'products/index',
+            '/categories' => 'categories/index',
+            '/customers' => 'customers/index',
+            '/sales'    => 'sales/index',
+            '/reports'  => 'dashboard/reports',
+            '/stores'   => 'stores/index',
+        ];
+
+        $view = $pages[$uri] ?? null;
+
+        if ($uri === '/products/create') $view = 'products/form';
+        if (preg_match('#^/products/(\d+)/edit$#', $uri)) $view = 'products/form';
+        if (preg_match('#^/sales/(\d+)$#', $uri)) $view = 'sales/show';
+
+        if ($view) {
+            $title_map = [
+                '/login' => 'Login', '/register' => 'Register', '/' => 'Dashboard',
+                '/pos' => 'POS - Point of Sale', '/products' => 'Products',
+                '/categories' => 'Categories', '/customers' => 'Customers',
+                '/sales' => 'Sales History', '/reports' => 'Reports',
+                '/stores' => 'Stores',
+            ];
+            $data = [];
+            if (preg_match('#^/products/(\d+)/edit$#', $uri, $m)) $data['productId'] = $m[1];
+            if (preg_match('#^/sales/(\d+)$#', $uri, $m)) $data['saleId'] = $m[1];
+
+            try { Response::page($title_map[$uri] ?? 'MIKO Pos', $view, $data); }
+            catch (\Exception $e) { echo '<h1>Error: ' . htmlspecialchars($e->getMessage()) . '</h1>'; }
+            exit;
+        }
+
+        // Logout
+        if ($uri === '/logout') {
+            Auth::logout();
+            header('Location: /login'); exit;
+        }
+
+        http_response_code(404);
+        echo '<!DOCTYPE html><html><head><title>404</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-100 flex items-center justify-center h-screen"><div class="text-center"><h1 class="text-6xl font-bold text-indigo-800">404</h1><p class="text-gray-600 mt-2">Page not found</p><a href="/" class="mt-4 inline-block bg-indigo-800 text-white px-4 py-2 rounded-lg">Go Home</a></div></body></html>';
+        exit;
+    }
+
+    // 404 API
     else {
+        header('Content-Type: application/json');
         http_response_code(404);
         echo json_encode(['success'=>false, 'message'=>'Route not found', 'uri'=>$uri, 'method'=>$method]);
     }
 
 } catch (\Exception $e) {
+    header('Content-Type: application/json');
     http_response_code(500);
     echo json_encode(['success'=>false, 'message'=>$e->getMessage()]);
 }
