@@ -559,6 +559,7 @@ const app = createApp({
             const stored = localStorage.getItem('miko_stores');
             if (stored) this.stores = JSON.parse(stored);
         } catch(e) {}
+        this.storesLoading = false;
     },
 });
 
