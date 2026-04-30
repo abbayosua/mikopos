@@ -22,31 +22,29 @@ if (str_starts_with($uri, '/api/')) {
 
 $router = Router::init();
 
-$router->before('GET|POST|PUT|DELETE', '/.*', function () {
-    $publicPaths = ['/login', '/register', '/app', '/api/auth/login', '/api/auth/register'];
+$router->before('GET|POST|PUT|DELETE', '/api/.*', function () {
+    $storeHeader = $_SERVER['HTTP_X_STORE_ID'] ?? $_SERVER['X-Store-Id'] ?? '';
+    if ($storeHeader) Auth::setRequestStoreId((int) $storeHeader);
+
+    $publicPaths = ['/api/auth/login', '/api/auth/register'];
     $currentUri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
-    $storeHeader = $_SERVER['HTTP_X_STORE_ID'] ?? $_SERVER['X-Store-Id'] ?? '';
-    if ($storeHeader) {
-        Auth::setRequestStoreId((int) $storeHeader);
-    }
-
-    $isApi = str_starts_with($currentUri, '/api/');
-    $isPublic = in_array($currentUri, $publicPaths);
-
-    if (!$isApi && !$isPublic && !Auth::check()) {
-        if (str_starts_with($currentUri, '/api/')) {
-            http_response_code(401);
-            echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-            exit;
-        }
-        Response::redirect('/login');
+    if (!in_array($currentUri, $publicPaths) && !Auth::check()) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+        exit;
     }
 });
 
-$router->get('/', function () {
-    Auth::requireAuth();
-    Response::page('Dashboard', 'dashboard/index');
+// SPA - serve on /app
+$router->get('/app', function () {
+    require __DIR__ . '/views/spa.php';
+});
+
+// Redirect page routes to SPA (but not API routes)
+$router->get('/(.*)', function ($path) {
+    if (str_starts_with($path, 'api/')) return;
+    Response::redirect('/app');
 });
 
 $router->get('/login', function () {
