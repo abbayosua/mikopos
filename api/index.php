@@ -221,41 +221,44 @@ try {
         Response::success(Database::fetchAll("SELECT s.*,u.name as cashier_name,c.name as customer_name FROM sales s LEFT JOIN users u ON u.id=s.user_id LEFT JOIN customers c ON c.id=s.customer_id WHERE ".implode(' AND ',$w)." ORDER BY s.created_at DESC", $p));
     }
     elseif ($uri === '/api/sales' && $method === 'POST') {
-        auth(); $d = Request::all(); $items = $d['items'] ?? [];
+        auth(); $d = json_decode(file_get_contents('php://input'), true) ?: $_POST; $items = $d['items'] ?? [];
         if (!is_array($items) || !$items) Response::error('Cart is empty');
         $tid = Auth::tenantId(); $uid = Auth::id(); $sid = Auth::storeId();
-        if (!$sid) Response::error('No store selected 400', 400);
-        $pdo = Database::getInstance()->getConnection(); $pdo->beginTransaction();
+        if (!$sid) Response::error('No store selected', 400);
+        $pdo = Database::getInstance()->getConnection();
+        try { $pdo->beginTransaction(); } catch (\Exception $e) { Response::error('beginTransaction: '.$e->getMessage(), 500); }
         try {
             $subtotal = 0; $saleItems = [];
             foreach ($items as $item) {
-                $sql = 'SELECT p.id,p.name,p.price,ps.stock FROM products p JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.id=:i AND p.tenant_id=:t';
-                $params = ['i'=>(int)$item['product_id'],'t'=>$tid,'s'=>$sid];
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute($params);
-                $prod = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
-                if (!$prod) throw new \Exception("Product {$item['product_id']} not found (store=$sid, tenant=$tid)");
+                try {
+                    $stmt = $pdo->prepare('SELECT p.id,p.name,p.price,ps.stock FROM products p JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.id=:i AND p.tenant_id=:t');
+                    $stmt->execute(['i'=>(int)$item['product_id'],'t'=>$tid,'s'=>$sid]);
+                    $prod = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+                } catch (\Exception $e) { throw new \Exception("SELECT product: ".$e->getMessage()); }
+                if (!$prod) throw new \Exception("Product not found");
                 $qty = max(1, (int)($item['quantity']??1));
-                if ((int)$prod['stock'] < $qty) throw new \Exception("Insufficient stock for {$prod['name']}: have {$prod['stock']}, need $qty");
+                if ((int)$prod['stock'] < $qty) throw new \Exception("Insufficient stock: have {$prod['stock']}, need $qty");
                 $price = (float)($item['price']??$prod['price']); $st = $price*$qty; $subtotal += $st;
                 $saleItems[] = ['product_id'=>$prod['id'],'product_name'=>$prod['name'],'quantity'=>$qty,'price'=>$price,'subtotal'=>$st];
-                $upd = $pdo->prepare('UPDATE product_stocks SET stock=stock-:q WHERE product_id=:i AND store_id=:s');
-                $upd->execute(['q'=>$qty,'i'=>$prod['id'],'s'=>$sid]);
+                try {
+                    $upd = $pdo->prepare('UPDATE product_stocks SET stock=stock-:q WHERE product_id=:i AND store_id=:s');
+                    $upd->execute(['q'=>$qty,'i'=>$prod['id'],'s'=>$sid]);
+                } catch (\Exception $e) { throw new \Exception("UPDATE stock: ".$e->getMessage()); }
             }
             $disc = (float)($d['discount']??0); $tax = (float)($d['tax']??0);
             $total = $subtotal-$disc+$tax; $paid = (float)($d['amount_paid']??0); $change = max(0,$paid-$total);
             $inv = 'INV-'.date('Ymd').'-'.strtoupper(substr(uniqid(),-6));
-            $cols = 'tenant_id,store_id,user_id,customer_id,invoice_no,subtotal,tax,discount,total,payment_method,amount_paid,change_amount,status,notes';
-            $phs = ':tenant_id,:store_id,:user_id,:customer_id,:invoice_no,:subtotal,:tax,:discount,:total,:payment_method,:amount_paid,:change_amount,:status,:notes';
-            $ins = $pdo->prepare("INSERT INTO sales ($cols) VALUES ($phs) RETURNING id");
-            $ins->execute(['tenant_id'=>$tid,'store_id'=>$sid,'user_id'=>$uid,'customer_id'=>!empty($d['customer_id'])?(int)$d['customer_id']:null,'invoice_no'=>$inv,'subtotal'=>$subtotal,'tax'=>$tax,'discount'=>$disc,'total'=>$total,'payment_method'=>$d['payment_method']??'cash','amount_paid'=>$paid,'change_amount'=>$change,'status'=>'completed','notes'=>$d['notes']??'']);
-            $saleId = (int) $ins->fetchColumn();
+            try {
+                $ins = $pdo->prepare("INSERT INTO sales (tenant_id,store_id,user_id,customer_id,invoice_no,subtotal,tax,discount,total,payment_method,amount_paid,change_amount,status,notes) VALUES (:tenant_id,:store_id,:user_id,:customer_id,:invoice_no,:subtotal,:tax,:discount,:total,:payment_method,:amount_paid,:change_amount,:status,:notes) RETURNING id");
+                $ins->execute(['tenant_id'=>$tid,'store_id'=>$sid,'user_id'=>$uid,'customer_id'=>!empty($d['customer_id'])?(int)$d['customer_id']:null,'invoice_no'=>$inv,'subtotal'=>$subtotal,'tax'=>$tax,'discount'=>$disc,'total'=>$total,'payment_method'=>$d['payment_method']??'cash','amount_paid'=>$paid,'change_amount'=>$change,'status'=>'completed','notes'=>$d['notes']??'']);
+                $saleId = (int) $ins->fetchColumn();
+            } catch (\Exception $e) { throw new \Exception("INSERT sale: ".$e->getMessage()); }
             foreach ($saleItems as $si) {
                 $si['sale_id'] = $saleId;
-                $c2 = implode(',', array_keys($si));
-                $p2 = ':'.implode(',:', array_keys($si));
-                $i2 = $pdo->prepare("INSERT INTO sale_items ($c2) VALUES ($p2)");
-                $i2->execute($si);
+                try {
+                    $i2 = $pdo->prepare("INSERT INTO sale_items (product_id,sale_id,product_name,quantity,price,subtotal) VALUES (:product_id,:sale_id,:product_name,:quantity,:price,:subtotal)");
+                    $i2->execute($si);
+                } catch (\Exception $e) { throw new \Exception("INSERT sale_item: ".$e->getMessage()); }
             }
             $pdo->commit();
             $s = $pdo->prepare('SELECT s.*,u.name as cashier_name,c.name as customer_name FROM sales s LEFT JOIN users u ON u.id=s.user_id LEFT JOIN customers c ON c.id=s.customer_id WHERE s.id=:i');
@@ -263,8 +266,8 @@ try {
             $sale = $s->fetch(\PDO::FETCH_ASSOC);
             $sale['items'] = $saleItems; Response::success($sale, 'Sale completed');
         } catch (\Exception $e) {
-            $pdo->rollBack();
-            Response::error('Sale failed at: '.$e->getMessage(), 422);
+            try { $pdo->rollBack(); } catch (\Exception $r) {}
+            Response::error('Sale: '.$e->getMessage(), 422);
         }
     }
     elseif (preg_match('#^/api/sales/(\d+)$#', $uri, $m) && $method === 'GET') {
