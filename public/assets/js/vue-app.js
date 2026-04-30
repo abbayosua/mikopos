@@ -128,23 +128,37 @@ const Dashboard = {
                     db.getAll('customers'),
                     db.getAll('sales_queue'),
                 ]);
-                // Today's sales from localStorage (cached from sync/init)
+                const synced = salesQueue.filter(s => s.synced);
+
+                // Today's sales from IndexedDB (seeded by sync/init)
                 let todaySales = { count: 0, total: 0 };
                 try {
-                    const cached = localStorage.getItem('miko_today_sales');
-                    if (cached) todaySales = JSON.parse(cached);
+                    const cached = await db.get('sync_meta', 'todaySales');
+                    if (cached?.data) todaySales = cached.data;
                 } catch(e) {}
-                // Add current session sales to today's total
-                const synced = salesQueue.filter(s => s.synced);
-                todaySales.count += synced.length;
+                todaySales.count = parseInt(todaySales.count || 0) + synced.length;
                 todaySales.total = parseFloat(todaySales.total || 0) + synced.reduce((s, x) => s + parseFloat(x.total || 0), 0);
+
+                // Recent sales from IndexedDB (seeded by sync/init)
+                let recentSales = [];
+                try {
+                    const cached = await db.get('sync_meta', 'recentSales');
+                    if (cached?.data) recentSales = cached.data;
+                } catch(e) {}
+                // Merge current session sales, avoid duplicates
+                for (const s of synced) {
+                    if (!recentSales.find(x => x.invoice_no === s.invoice_no)) {
+                        recentSales.unshift({ invoice_no: s.invoice_no || 'PENDING', total: s.total, created_at: s.created_at, customer_name: null, cashier_name: 'Cashier' });
+                    }
+                }
                 this.stats = {
                     product_count: products.length,
                     customer_count: customers.length,
                     low_stock: products.filter(p => p.stock <= p.min_stock).slice(0, 5),
                     today_sales: todaySales,
-                    recent_sales: synced.slice(-5).reverse(),
+                    recent_sales: recentSales.slice(0, 5),
                 };
+
                 sync.syncNow();
             } catch(e) {}
             this.loading = false;
