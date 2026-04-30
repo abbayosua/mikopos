@@ -42,10 +42,7 @@ $router->get('/app', function () {
 });
 
 // Redirect page routes to SPA (but not API routes)
-$router->get('/(.*)', function ($path) {
-    if (str_starts_with($path, 'api/')) return;
-    Response::redirect('/app');
-});
+// All unmatched routes redirect to SPA
 
 $router->get('/login', function () {
     if (Auth::check()) Response::redirect('/');
@@ -495,8 +492,7 @@ $router->get('/api/stores/current', function () {
 });
 
 $router->set404(function () {
-    http_response_code(404);
-    echo '<h1>404 - Not Found</h1>';
+    Response::redirect('/app');
 });
 
 $router->run();
