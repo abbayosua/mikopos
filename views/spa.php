@@ -86,6 +86,15 @@
                         <i class="fas fa-store w-5 text-center"></i>
                         <span v-show="sidebarOpen">Stores</span>
                     </router-link>
+                    <hr class="border-indigo-700 my-2">
+                    <div v-if="!syncOnline" class="flex items-center gap-3 px-3 py-2 text-yellow-300 text-sm">
+                        <i class="fas fa-wifi-slash w-5 text-center"></i>
+                        <span v-show="sidebarOpen">Offline</span>
+                    </div>
+                    <div v-if="syncPending > 0" class="flex items-center gap-3 px-3 py-2 text-indigo-300 text-sm">
+                        <i class="fas fa-cloud-upload-alt w-5 text-center"></i>
+                        <span v-show="sidebarOpen">{{ syncPending }} pending</span>
+                    </div>
                     <a href="#" @click.prevent="logout" class="flex items-center gap-3 px-3 py-2 rounded hover:bg-red-600">
                         <i class="fas fa-sign-out-alt w-5 text-center"></i>
                         <span v-show="sidebarOpen">Logout</span>
@@ -100,6 +109,8 @@
 
     <script src="/assets/js/lib/api.js"></script>
     <script src="/assets/js/lib/cache.js"></script>
+    <script src="/assets/js/lib/db.js"></script>
+    <script src="/assets/js/lib/sync.js"></script>
     <script src="/assets/js/vue-app.js"></script>
 </body>
 </html>

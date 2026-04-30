@@ -350,6 +350,84 @@ try {
         ]);
     }
 
+    // === SYNC ENDPOINTS ===
+    elseif ($uri === '/api/sync/init' && $method === 'GET') {
+        auth(); $tid = Auth::tenantId(); $sid = Auth::storeId();
+        if (!$sid) Response::error('No store selected', 400);
+
+        $store = Database::fetch('SELECT * FROM stores WHERE id=:i', ['i'=>$sid]);
+        $categories = Database::fetchAll('SELECT c.*,(SELECT COUNT(*) FROM products p WHERE p.category_id=c.id) as product_count FROM categories c WHERE c.tenant_id=:t ORDER BY c.name', ['t'=>$tid]);
+        $customers = Database::fetchAll('SELECT c.*,(SELECT COUNT(*) FROM sales s WHERE s.customer_id=c.id) as sale_count,(SELECT COALESCE(SUM(s.total),0) FROM sales s WHERE s.customer_id=c.id) as total_spent FROM customers c WHERE c.tenant_id=:t ORDER BY c.name', ['t'=>$tid]);
+        $products = Database::fetchAll("SELECT p.id,p.tenant_id,p.category_id,p.name,p.sku,p.barcode,p.price,p.cost,ps.stock,ps.min_stock,p.description,p.image,p.is_active,p.created_at,p.updated_at,c.name as category_name FROM products p LEFT JOIN categories c ON c.id=p.category_id JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.tenant_id=:t AND p.is_active=true ORDER BY p.name", ['t'=>$tid, 's'=>$sid]);
+        $allStores = Database::fetchAll('SELECT * FROM stores WHERE tenant_id=:t AND is_active=true', ['t'=>$tid]);
+
+        Response::success(['store'=>$store,'categories'=>$categories,'customers'=>$customers,'products'=>$products,'stores'=>$allStores,'synced_at'=>date('c')]);
+    }
+    elseif ($uri === '/api/sync/products' && $method === 'GET') {
+        auth(); $tid = Auth::tenantId(); $sid = Auth::storeId(); $since = Request::get('since','');
+        if (!$sid) Response::error('No store selected', 400);
+
+        $params = ['t'=>$tid, 's'=>$sid];
+        $where = 'p.tenant_id=:t AND p.is_active=true';
+        if ($since) { $where .= ' AND p.updated_at>:since'; $params['since'] = $since; }
+
+        $products = Database::fetchAll("SELECT p.id,p.tenant_id,p.category_id,p.name,p.sku,p.barcode,p.price,p.cost,ps.stock,ps.min_stock,p.description,p.image,p.is_active,p.created_at,p.updated_at,c.name as category_name FROM products p LEFT JOIN categories c ON c.id=p.category_id JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE $where ORDER BY p.name", $params);
+        Response::success(['products'=>$products, 'synced_at'=>date('c')]);
+    }
+    elseif ($uri === '/api/sync/sales' && $method === 'POST') {
+        auth(); $d = json_decode(file_get_contents('php://input'), true) ?: $_POST; $items = $d['items'] ?? [];
+        if (!is_array($items) || !$items) Response::error('Cart is empty');
+        $tid = Auth::tenantId(); $uid = Auth::id(); $sid = Auth::storeId();
+        if (!$sid) Response::error('No store selected', 400);
+        $pdo = Database::getInstance()->getConnection();
+        try { $pdo->beginTransaction(); } catch (\Exception $e) { Response::error('TX: '.$e->getMessage(), 500); }
+        try {
+            $subtotal = 0; $saleItems = [];
+            foreach ($items as $item) {
+                try {
+                    $stmt = $pdo->prepare('SELECT p.id,p.name,p.price,ps.stock FROM products p JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.id=:i AND p.tenant_id=:t');
+                    $stmt->execute(['i'=>(int)$item['product_id'],'t'=>$tid,'s'=>$sid]);
+                    $prod = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+                } catch (\Exception $e) { throw new \Exception("SELECT: ".$e->getMessage()); }
+                if (!$prod) throw new \Exception("Product not found");
+                $qty = max(1, (int)($item['quantity']??1));
+                $price = (float)($item['price']??$prod['price']); $st = $price*$qty; $subtotal += $st;
+                $saleItems[] = ['product_id'=>$prod['id'],'product_name'=>$prod['name'],'quantity'=>$qty,'price'=>$price,'subtotal'=>$st];
+                try {
+                    $upd = $pdo->prepare('UPDATE product_stocks SET stock=GREATEST(0, stock-:q) WHERE product_id=:i AND store_id=:s');
+                    $upd->execute(['q'=>$qty,'i'=>$prod['id'],'s'=>$sid]);
+                } catch (\Exception $e) { throw new \Exception("UPDATE: ".$e->getMessage()); }
+            }
+            $disc = (float)($d['discount']??0); $tax = (float)($d['tax']??0);
+            $total = $subtotal-$disc+$tax; $paid = (float)($d['amount_paid']??0); $change = max(0,$paid-$total);
+            $inv = 'INV-'.date('Ymd').'-'.strtoupper(substr(uniqid(),-6));
+            try {
+                $ins = $pdo->prepare("INSERT INTO sales (tenant_id,store_id,user_id,customer_id,invoice_no,subtotal,tax,discount,total,payment_method,amount_paid,change_amount,status,notes) VALUES (:t,:s,:u,:c,:inv,:sub,:tax,:disc,:total,:pm,:paid,:ch,'completed','') RETURNING id");
+                $ins->execute(['t'=>$tid,'s'=>$sid,'u'=>$uid,'c'=>!empty($d['customer_id'])?(int)$d['customer_id']:null,'inv'=>$inv,'sub'=>$subtotal,'tax'=>$tax,'disc'=>$disc,'total'=>$total,'pm'=>$d['payment_method']??'cash','paid'=>$paid,'ch'=>$change]);
+                $saleId = (int) $ins->fetchColumn();
+            } catch (\Exception $e) { throw new \Exception("INSERT sale: ".$e->getMessage()); }
+            foreach ($saleItems as $si) {
+                try {
+                    $i2 = $pdo->prepare("INSERT INTO sale_items (product_id,sale_id,product_name,quantity,price,subtotal) VALUES (:pid,:sid,:pn,:qty,:pr,:sub)");
+                    $i2->execute(['pid'=>$si['product_id'],'sid'=>$saleId,'pn'=>$si['product_name'],'qty'=>$si['quantity'],'pr'=>$si['price'],'sub'=>$si['subtotal']]);
+                } catch (\Exception $e) { throw new \Exception("INSERT item: ".$e->getMessage()); }
+            }
+            $pdo->commit();
+            $s = $pdo->prepare('SELECT s.*,u.name as cashier_name FROM sales s LEFT JOIN users u ON u.id=s.user_id WHERE s.id=:i');
+            $s->execute(['i'=>$saleId]);
+            $sale = $s->fetch(\PDO::FETCH_ASSOC);
+            $sale['items'] = $saleItems; Response::success($sale, 'Sale synced');
+        } catch (\Exception $e) {
+            try { $pdo->rollBack(); } catch (\Exception $r) {}
+            Response::error('Sync: '.$e->getMessage(), 422);
+        }
+    }
+    elseif ($uri === '/api/sync/status' && $method === 'GET') {
+        auth();
+        $pending = Database::fetch('SELECT COUNT(*) as c FROM sales WHERE status=:s', ['s'=>'pending']); // for future use
+        Response::success(['server_time'=>date('c'), 'db_connected'=>true]);
+    }
+
     // === SPA Shell ===
     elseif ($uri === '/app' && $method === 'GET') {
         header('Content-Type: text/html; charset=UTF-8');

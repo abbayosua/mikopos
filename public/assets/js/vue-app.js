@@ -233,12 +233,24 @@ const Pos = {
         async checkout() {
             if (!this.cart.length) return; if (this.amount_paid < this.total) { this.saleError = 'Amount paid less than total'; return; }
             this.saleLoading = true; this.saleError = '';
+            const saleData = { items: this.cart.map(i => ({ product_id: i.product_id, quantity: i.quantity, price: i.price })), customer_id: this.customer_id || null, discount: this.discount, tax: this.tax, payment_method: this.payment_method, amount_paid: this.amount_paid };
+
+            if (navigator.onLine) {
+                try {
+                    const res = await apiPost('/api/sales', saleData);
+                    const d = await res.json();
+                    if (d.success) { this.receipt = d.data; mikoCache.removePattern('products'); this.saleLoading = false; return; }
+                    this.saleError = d.message;
+                } catch(e) { /* fall through to offline */ }
+            }
+
+            // Offline: queue sale
             try {
-                const res = await apiPost('/api/sales', { items: this.cart.map(i => ({ product_id: i.product_id, quantity: i.quantity, price: i.price })), customer_id: this.customer_id || null, discount: this.discount, tax: this.tax, payment_method: this.payment_method, amount_paid: this.amount_paid });
-                const d = await res.json();
-                if (d.success) { this.receipt = d.data; mikoCache.removePattern('products'); } else this.saleError = d.message;
-            } catch(e) { this.saleError = 'Connection error'; }
-            finally { this.saleLoading = false; }
+                const localId = await sync.queueSale(saleData);
+                this.receipt = { invoice_no: 'OFFLINE-' + localId.substr(-8), items: this.cart.map(i => ({ product_name: i.name, quantity: i.quantity, subtotal: i.subtotal })), total: this.total, amount_paid: this.amount_paid, change_amount: this.change, cashier_name: 'Offline', customer_name: this.customer_id ? 'Saved' : null, created_at: new Date().toISOString(), offline: true };
+                this.saleError = '';
+            } catch(e) { this.saleError = 'Failed to save offline'; }
+            this.saleLoading = false;
         },
     },
     async created() {
@@ -528,6 +540,8 @@ const app = createApp({
         stores: [],
         storesLoading: true,
         loadError: '',
+        syncOnline: navigator.onLine,
+        syncPending: 0,
     }),
     methods: {
         logout() {
@@ -560,6 +574,10 @@ const app = createApp({
             if (stored) this.stores = JSON.parse(stored);
         } catch(e) {}
         this.storesLoading = false;
+        if (this.authenticated) {
+            sync.onChange((s) => { this.syncOnline = s.online; this.syncPending = s.pendingCount; });
+            sync.init();
+        }
     },
 });
 
