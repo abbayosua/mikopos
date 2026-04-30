@@ -8,6 +8,15 @@
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <link rel="stylesheet" href="/assets/css/app.css">
+    <?php if (!in_array(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH), ['/login', '/register'])): ?>
+    <script>
+    (function() {
+        if (!localStorage.getItem('token')) {
+            window.location.href = '/login';
+        }
+    })();
+    </script>
+    <?php endif; ?>
 </head>
 <body class="bg-gray-100 min-h-screen">
     <?php if (\Miko\Auth::check()): ?>

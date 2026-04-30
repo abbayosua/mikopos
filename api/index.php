@@ -332,22 +332,8 @@ try {
     elseif ($method === 'GET' && !str_starts_with($uri, '/api/')) {
         header('Content-Type: text/html; charset=UTF-8');
 
-        // Parse JWT from Authorization header for page loads
-        $storeHeader = $_SERVER['HTTP_X_STORE_ID'] ?? $_SERVER['X-Store-Id'] ?? '';
-        if ($storeHeader) Auth::setRequestStoreId((int) $storeHeader);
-
         $publicPages = ['/login', '/register'];
         $isPublic = in_array($uri, $publicPages);
-
-        // Redirect to login if not authenticated and not on a public page
-        if (!$isPublic && !Auth::check()) {
-            header('Location: /login'); exit;
-        }
-
-        // If already logged in and visiting login/register, redirect to dashboard
-        if ($isPublic && Auth::check()) {
-            header('Location: /'); exit;
-        }
 
         $pages = [
             '/login'    => 'auth/login',
