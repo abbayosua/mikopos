@@ -69,8 +69,8 @@ const sync = {
         };
         await db.put('sales_queue', sale);
         await this.updatePendingCount();
-        // Try push immediately if online
-        if (this.online) await this.pushUnsyncedSales();
+        // Fire-and-forget background sync (don't block the receipt)
+        if (this.online) this.pushUnsyncedSales();
         return sale;
     },
 
