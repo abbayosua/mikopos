@@ -416,6 +416,21 @@ $router->get('/api/products/lookup', function () {
     Response::success($result, 'Found via Open Food Facts');
 });
 
+// API: POS init (bundled data)
+$router->get('/api/pos/init', function () {
+    Auth::requireAuth();
+    $tid = Auth::tenantId(); $sid = Auth::storeId();
+    if (!$sid) Response::error('No store selected', 400);
+
+    $store = Database::fetch('SELECT * FROM stores WHERE id=:i', ['i'=>$sid]);
+    $categories = Database::fetchAll('SELECT c.*,(SELECT COUNT(*) FROM products p WHERE p.category_id=c.id) as product_count FROM categories c WHERE c.tenant_id=:t ORDER BY c.name', ['t'=>$tid]);
+    $customers = Database::fetchAll('SELECT c.*,(SELECT COUNT(*) FROM sales s WHERE s.customer_id=c.id) as sale_count,(SELECT COALESCE(SUM(s.total),0) FROM sales s WHERE s.customer_id=c.id) as total_spent FROM customers c WHERE c.tenant_id=:t ORDER BY c.name', ['t'=>$tid]);
+    $products = Database::fetchAll("SELECT p.id,p.tenant_id,p.category_id,p.name,p.sku,p.barcode,p.price,p.cost,ps.stock,ps.min_stock,p.description,p.image,p.is_active,p.created_at,p.updated_at,c.name as category_name FROM products p LEFT JOIN categories c ON c.id=p.category_id JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.tenant_id=:t AND p.is_active=true ORDER BY p.name", ['t'=>$tid, 's'=>$sid]);
+    $lowStock = Database::fetchAll('SELECT p.id,p.name,p.sku,ps.stock,ps.min_stock FROM products p JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.tenant_id=:t AND p.is_active=true AND ps.stock<=ps.min_stock ORDER BY ps.stock LIMIT 5', ['t'=>$tid, 's'=>$sid]);
+
+    Response::success(['store'=>$store,'categories'=>$categories,'customers'=>$customers,'products'=>$products,'low_stock'=>$lowStock,'token_check'=>time()]);
+});
+
 // API: Sale receipt
 $router->get('/api/sales/(\d+)/receipt', function (int $id) {
     Auth::requireAuth();

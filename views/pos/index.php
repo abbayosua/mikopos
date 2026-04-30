@@ -268,15 +268,25 @@ function pos() {
         receipt: {},
 
         async init() {
-            const meRes = await apiFetch('/api/auth/me');
+            const [meRes, initRes] = await Promise.all([
+                apiFetch('/api/auth/me'),
+                apiFetch('/api/pos/init'),
+            ]);
             const me = await meRes.json();
+            const init = await initRes.json();
+
             if (me.success) {
                 this.stores = me.data.stores || [];
                 this.currentStore = me.data.store;
             }
-            await this.loadCategories();
-            await this.loadCustomers();
-            if (this.currentStore) await this.searchProducts();
+            if (init.success) {
+                const d = init.data;
+                this.products = d.products || [];
+                this.categories = d.categories || [];
+                this.customers = d.customers || [];
+                cache.set('categories', this.categories, 30 * 60 * 1000);
+                cache.set('customers', this.customers, 10 * 60 * 1000);
+            }
         },
 
         async selectStore(storeId) {
@@ -289,7 +299,16 @@ function pos() {
             if (data.success) {
                 this.currentStore = data.data.store;
                 localStorage.setItem('store_id', storeId);
-                await this.searchProducts();
+                cache.remove('products');
+                cache.remove('categories');
+                cache.remove('customers');
+                const initRes = await apiFetch('/api/pos/init');
+                const init = await initRes.json();
+                if (init.success) {
+                    this.products = init.data.products || [];
+                    this.categories = init.data.categories || [];
+                    this.customers = init.data.customers || [];
+                }
             }
         },
 
@@ -373,15 +392,25 @@ function pos() {
         },
 
         async loadCategories() {
+            let cats = cache.get('categories');
+            if (cats) { this.categories = cats; return; }
             const res = await apiFetch('/api/categories');
             const data = await res.json();
-            if (data.success) this.categories = data.data;
+            if (data.success) {
+                this.categories = data.data;
+                cache.set('categories', this.categories, 30 * 60 * 1000);
+            }
         },
 
         async loadCustomers() {
+            let custs = cache.get('customers');
+            if (custs) { this.customers = custs; return; }
             const res = await apiFetch('/api/customers');
             const data = await res.json();
-            if (data.success) this.customers = data.data;
+            if (data.success) {
+                this.customers = data.data;
+                cache.set('customers', this.customers, 10 * 60 * 1000);
+            }
         },
 
         async searchProducts() {
@@ -390,7 +419,10 @@ function pos() {
             if (this.categoryFilter) params.set('category_id', this.categoryFilter);
             const res = await apiFetch('/api/products?' + params);
             const data = await res.json();
-            if (data.success) this.products = data.data;
+            if (data.success) {
+                this.products = data.data;
+                cache.set('products', data.data, 5 * 60 * 1000);
+            }
         },
 
         addToCart(product) {
@@ -460,6 +492,7 @@ function pos() {
                 if (data.success) {
                     this.receipt = data.data;
                     this.showReceipt = true;
+                    cache.removePattern('products');
                 } else {
                     this.error = data.message;
                 }
@@ -480,6 +513,7 @@ function pos() {
             this.subtotal = 0;
             this.total = 0;
             this.error = '';
+            cache.removePattern('products');
             this.searchProducts();
         },
 

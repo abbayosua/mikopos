@@ -106,7 +106,7 @@ function customers() {
                 const method = this.editing ? 'PUT' : 'POST';
                 const res = await apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this.form) });
                 const data = await res.json();
-                if (data.success) { this.showModal = false; this.editing = false; this.form = { name: '', phone: '', email: '', address: '' }; this.load(); }
+                if (data.success) { cache.remove('customers'); this.showModal = false; this.editing = false; this.form = { name: '', phone: '', email: '', address: '' }; this.load(); }
                 else this.error = data.message;
             } catch(e) { this.error = 'Connection error'; }
             finally { this.loading = false; }
@@ -114,7 +114,7 @@ function customers() {
         async remove(id) {
             if (!confirm('Delete this customer?')) return;
             const res = await apiFetch('/api/customers/' + id, { method: 'DELETE' });
-            if ((await res.json()).success) this.load();
+            if ((await res.json()).success) { cache.remove('customers'); this.load(); }
         },
         formatMoney(n) { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(n || 0); }
     }

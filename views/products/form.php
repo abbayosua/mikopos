@@ -257,6 +257,8 @@ function productForm() {
                 });
                 const data = await res.json();
                 if (data.success) {
+                    cache.removePattern('products');
+                    cache.removePattern('categories');
                     window.location.href = '/products';
                 } else {
                     this.error = data.message || 'Save failed';

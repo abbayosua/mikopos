@@ -95,6 +95,7 @@ function categories() {
                     this.showForm = false;
                     this.form = { name: '', description: '' };
                     this.editing = false;
+                    cache.remove('categories');
                     this.load();
                 } else {
                     this.error = data.message || 'Save failed';
@@ -109,7 +110,7 @@ function categories() {
             if (!confirm('Delete this category?')) return;
             const res = await apiFetch('/api/categories/' + id, { method: 'DELETE' });
             const data = await res.json();
-            if (data.success) this.load();
+            if (data.success) { cache.remove('categories'); this.load(); }
         }
     }
 }
