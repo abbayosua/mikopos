@@ -353,6 +353,7 @@ try {
     // === PAGE ROUTES (HTML) ===
     elseif ($method === 'GET' && !str_starts_with($uri, '/api/')) {
         header('Content-Type: text/html; charset=UTF-8');
+        header('Cache-Control: private, max-age=30, stale-while-revalidate=300');
 
         $publicPages = ['/login', '/register'];
         $isPublic = in_array($uri, $publicPages);
