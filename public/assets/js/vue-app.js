@@ -123,15 +123,27 @@ const Dashboard = {
             this.refreshing = true;
             this.loading = true;
             try {
-                const products = await db.getAll('products');
-                const customers = await db.getAll('customers');
-                const salesQueue = await db.getAll('sales_queue');
+                const [products, customers, salesQueue] = await Promise.all([
+                    db.getAll('products'),
+                    db.getAll('customers'),
+                    db.getAll('sales_queue'),
+                ]);
+                // Today's sales from localStorage (cached from sync/init)
+                let todaySales = { count: 0, total: 0 };
+                try {
+                    const cached = localStorage.getItem('miko_today_sales');
+                    if (cached) todaySales = JSON.parse(cached);
+                } catch(e) {}
+                // Add current session sales to today's total
+                const synced = salesQueue.filter(s => s.synced);
+                todaySales.count += synced.length;
+                todaySales.total = parseFloat(todaySales.total || 0) + synced.reduce((s, x) => s + parseFloat(x.total || 0), 0);
                 this.stats = {
                     product_count: products.length,
                     customer_count: customers.length,
                     low_stock: products.filter(p => p.stock <= p.min_stock).slice(0, 5),
-                    today_sales: { count: salesQueue.filter(s => s.synced).length, total: 0 },
-                    recent_sales: salesQueue.filter(s => s.synced).slice(-5).reverse(),
+                    today_sales: todaySales,
+                    recent_sales: synced.slice(-5).reverse(),
                 };
                 sync.syncNow();
             } catch(e) {}

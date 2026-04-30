@@ -360,8 +360,9 @@ try {
         $customers = Database::fetchAll('SELECT c.*,(SELECT COUNT(*) FROM sales s WHERE s.customer_id=c.id) as sale_count,(SELECT COALESCE(SUM(s.total),0) FROM sales s WHERE s.customer_id=c.id) as total_spent FROM customers c WHERE c.tenant_id=:t ORDER BY c.name', ['t'=>$tid]);
         $products = Database::fetchAll("SELECT p.id,p.tenant_id,p.category_id,p.name,p.sku,p.barcode,p.price,p.cost,ps.stock,ps.min_stock,p.description,p.image,p.is_active,p.created_at,p.updated_at,c.name as category_name FROM products p LEFT JOIN categories c ON c.id=p.category_id JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.tenant_id=:t AND p.is_active=true ORDER BY p.name", ['t'=>$tid, 's'=>$sid]);
         $allStores = Database::fetchAll('SELECT * FROM stores WHERE tenant_id=:t AND is_active=true', ['t'=>$tid]);
+        $todaySales = Database::fetch("SELECT COUNT(*) as count, COALESCE(SUM(total),0) as total FROM sales WHERE tenant_id=:t AND store_id=:s AND created_at::date = CURRENT_DATE AND status='completed'", ['t'=>$tid, 's'=>$sid]);
 
-        Response::success(['store'=>$store,'categories'=>$categories,'customers'=>$customers,'products'=>$products,'stores'=>$allStores,'synced_at'=>date('c')]);
+        Response::success(['store'=>$store,'categories'=>$categories,'customers'=>$customers,'products'=>$products,'stores'=>$allStores,'today_sales'=>$todaySales,'synced_at'=>date('c')]);
     }
     elseif ($uri === '/api/sync/products' && $method === 'GET') {
         auth(); $tid = Auth::tenantId(); $sid = Auth::storeId(); $since = Request::get('since','');
