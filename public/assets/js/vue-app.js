@@ -534,13 +534,18 @@ const app = createApp({
             this.$router.push('/login');
         },
         async selectStore(s) {
-            const res = await apiPost('/api/stores/switch', { store_id: s.id });
-            const d = await res.json();
-            if (d.success) {
-                localStorage.setItem('store_id', s.id);
-                localStorage.setItem('store_name', s.name);
-                this.storeId = s.id;
-                this.storeName = s.name;
+            try {
+                const res = await apiPost('/api/stores/switch', { store_id: s.id });
+                const d = await res.json();
+                if (d.success) {
+                    localStorage.setItem('store_id', s.id);
+                    localStorage.setItem('store_name', s.name);
+                    this.storeId = s.id;
+                    this.storeName = s.name;
+                    this.$router.push('/');
+                }
+            } catch(e) {
+                alert('Failed to select store: ' + e.message);
             }
         },
         async fetchStores() {
