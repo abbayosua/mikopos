@@ -6,13 +6,11 @@
         </button>
     </div>
 
-    <template x-if="pageLoading">
-        <div class="flex justify-center py-20">
-            <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i>
-        </div>
-    </template>
+    <div x-show="pageLoading" class="flex justify-center py-20">
+        <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i>
+    </div>
 
-    <template x-if="!pageLoading">
+    <div x-show="!pageLoading">
     <div class="bg-white rounded-lg shadow">
         <div class="p-4 border-b">
             <input type="text" x-model="search" @input.debounce="load" placeholder="Search customers..." class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -85,7 +83,7 @@
 </div>
 
     </div>
-    </template>
+    </div>
 
 <script>
 function customers() {

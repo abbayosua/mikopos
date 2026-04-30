@@ -6,13 +6,11 @@
         </button>
     </div>
 
-    <template x-if="pageLoading">
-        <div class="flex justify-center py-20">
-            <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i>
-        </div>
-    </template>
+    <div x-show="pageLoading" class="flex justify-center py-20">
+        <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i>
+    </div>
 
-    <template x-if="!pageLoading">
+    <div x-show="!pageLoading">
     <div class="bg-white rounded-lg shadow overflow-x-auto">
         <table class="w-full text-sm">
             <thead>
@@ -81,7 +79,7 @@
             </form>
         </div>
     </div>
-    </template>
+    </div>
 </div>
 
 <script>

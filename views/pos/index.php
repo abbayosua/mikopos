@@ -1,31 +1,26 @@
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <div x-data="pos()" x-init="init()" class="h-full">
     <!-- Loading -->
-    <template x-if="pageLoading && !currentStore">
-        <div class="flex items-center justify-center h-[calc(100vh-8rem)]">
-            <i class="fas fa-spinner fa-pulse text-5xl text-indigo-800"></i>
-        </div>
-    </template>
+    <div x-show="pageLoading && !currentStore" class="flex items-center justify-center h-[calc(100vh-8rem)]">
+        <i class="fas fa-spinner fa-pulse text-5xl text-indigo-800"></i>
+    </div>
 
-    <template x-if="!pageLoading || currentStore">
     <!-- Store Required -->
-    <template x-if="!currentStore">
-        <div class="flex items-center justify-center h-[calc(100vh-8rem)]">
-            <div class="bg-white rounded-lg shadow-lg p-8 text-center max-w-md">
-                <i class="fas fa-store text-6xl text-indigo-300 mb-4"></i>
-                <h2 class="text-xl font-bold mb-2">Select a Store</h2>
-                <p class="text-gray-500 mb-6">You need to select a store before using the POS.</p>
-                <div class="space-y-2">
-                    <template x-for="store in stores" :key="store.id">
-                        <button @click="selectStore(store.id)" class="w-full bg-indigo-800 text-white py-3 rounded-lg hover:bg-indigo-900 font-medium">
-                            <i class="fas fa-store mr-2"></i>
-                            <span x-text="store.name"></span>
-                        </button>
-                    </template>
-                </div>
+    <div x-show="!pageLoading && !currentStore" class="flex items-center justify-center h-[calc(100vh-8rem)]">
+        <div class="bg-white rounded-lg shadow-lg p-8 text-center max-w-md">
+            <i class="fas fa-store text-6xl text-indigo-300 mb-4"></i>
+            <h2 class="text-xl font-bold mb-2">Select a Store</h2>
+            <p class="text-gray-500 mb-6">You need to select a store before using the POS.</p>
+            <div class="space-y-2">
+                <template x-for="store in stores" :key="store.id">
+                    <button @click="selectStore(store.id)" class="w-full bg-indigo-800 text-white py-3 rounded-lg hover:bg-indigo-900 font-medium">
+                        <i class="fas fa-store mr-2"></i>
+                        <span x-text="store.name"></span>
+                    </button>
+                </template>
             </div>
         </div>
-    </template>
+    </div>
 
     <!-- POS Interface -->
     <template x-if="currentStore">
@@ -244,7 +239,6 @@
             </div>
         </div>
     </div>
-    </template>
 </div>
 
 <script>
