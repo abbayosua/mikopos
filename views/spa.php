@@ -13,7 +13,10 @@
 <body class="bg-gray-100">
     <div id="app">
         <div v-if="!authenticated && $route.path !== '/login' && $route.path !== '/register'" class="min-h-screen flex items-center justify-center">
-            <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i>
+            <div class="text-center">
+                <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800 mb-4"></i>
+                <p class="text-gray-500 text-sm">Redirecting to login...</p>
+            </div>
         </div>
         <div v-else class="flex h-screen">
             <aside v-show="authenticated" :class="sidebarOpen ? 'w-64' : 'w-16'" class="bg-indigo-800 text-white transition-all duration-300 flex-shrink-0">

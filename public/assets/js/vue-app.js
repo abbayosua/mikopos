@@ -485,6 +485,7 @@ const NotFound = { template: '<div class="text-center py-20"><h1 class="text-6xl
 const routes = [
     { path: '/login', component: Login },
     { path: '/register', component: Register },
+    { path: '/app', redirect: '/' },
     { path: '/', component: Dashboard, beforeEnter: requireAuth },
     { path: '/pos', component: Pos, beforeEnter: requireAuth },
     { path: '/products', component: Products, beforeEnter: requireAuth },
@@ -502,6 +503,17 @@ const routes = [
 const router = VueRouter.createRouter({
     history: VueRouter.createWebHistory(),
     routes,
+});
+
+// Global auth guard: redirect to /login if not authenticated
+router.beforeEach((to, from, next) => {
+    const token = localStorage.getItem('token');
+    const publicPaths = ['/login', '/register', '/app'];
+    if (!token && !publicPaths.includes(to.path)) {
+        next('/login');
+    } else {
+        next();
+    }
 });
 
 // ── App ──
