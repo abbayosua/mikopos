@@ -119,10 +119,19 @@ const Dashboard = {
     data: () => ({ stats: {}, loading: true }),
     methods: { fmt: fmtMoney },
     async created() {
-        const cached = mikoCache.get('dashboard');
-        if (cached) { this.stats = cached; this.loading = false; }
-        const res = await apiJson('/api/dashboard/stats');
-        if (res.success) { this.stats = res.data; mikoCache.set('dashboard', res.data, 2 * 60 * 1000); }
+        // Read from IndexedDB (seeded by sync)
+        try {
+            const products = await db.getAll('products');
+            const customers = await db.getAll('customers');
+            const salesQueue = await db.getAll('sales_queue');
+            this.stats = {
+                product_count: products.length,
+                customer_count: customers.length,
+                low_stock: products.filter(p => p.stock <= p.min_stock).slice(0, 5),
+                today_sales: { count: salesQueue.filter(s => s.synced).length, total: 0 },
+                recent_sales: salesQueue.filter(s => s.synced).slice(-5).reverse(),
+            };
+        } catch(e) {}
         this.loading = false;
     },
 };
@@ -223,39 +232,67 @@ const Pos = {
             if (d.success) { localStorage.setItem('store_id', id); this.currentStore = d.data.store; await this.loadInit(); }
         },
         async loadInit() {
-            const cached = mikoCache.get('posInit');
-            if (cached) { this.products = cached.products; this.categories = cached.categories; this.customers = cached.customers; this.pageLoading = false; }
-            const res = await apiJson('/api/pos/init');
-            if (res.success) { this.products = res.data.products; this.categories = res.data.categories; this.customers = res.data.customers; mikoCache.set('posInit', { products: this.products, categories: this.categories, customers: this.customers }, 300000); }
+            // Read from IndexedDB instantly
+            try {
+                this.products = await db.getAll('products');
+                this.categories = await db.getAll('categories');
+                this.customers = await db.getAll('customers');
+            } catch(e) {}
             this.pageLoading = false;
         },
         resetCart() { this.cart = []; this.customer_id = ''; this.discount = 0; this.tax = 0; this.amount_paid = 0; this.change = 0; this.subtotal = 0; this.total = 0; this.saleError = ''; mikoCache.removePattern('products'); },
         async checkout() {
-            if (!this.cart.length) return; if (this.amount_paid < this.total) { this.saleError = 'Amount paid less than total'; return; }
+            if (!this.cart.length) return;
+            if (this.amount_paid < this.total) { this.saleError = 'Amount paid less than total'; return; }
             this.saleLoading = true; this.saleError = '';
-            const saleData = { items: this.cart.map(i => ({ product_id: i.product_id, quantity: i.quantity, price: i.price })), customer_id: this.customer_id || null, discount: this.discount, tax: this.tax, payment_method: this.payment_method, amount_paid: this.amount_paid };
 
-            if (navigator.onLine) {
-                try {
-                    const res = await apiPost('/api/sales', saleData);
-                    const d = await res.json();
-                    if (d.success) { this.receipt = d.data; mikoCache.removePattern('products'); this.saleLoading = false; return; }
-                    this.saleError = d.message;
-                } catch(e) { /* fall through to offline */ }
-            }
+            const saleData = {
+                items: this.cart.map(i => ({ product_id: i.product_id, quantity: i.quantity, price: i.price })),
+                customer_id: this.customer_id || null,
+                discount: this.discount, tax: this.tax,
+                payment_method: this.payment_method, amount_paid: this.amount_paid,
+                total: this.total, change_amount: this.change,
+                product_names: this.cart.map(i => i.name),
+            };
 
-            // Offline: queue sale
+            // Save to IndexedDB first (always works, offline or online)
             try {
-                const localId = await sync.queueSale(saleData);
-                this.receipt = { invoice_no: 'OFFLINE-' + localId.substr(-8), items: this.cart.map(i => ({ product_name: i.name, quantity: i.quantity, subtotal: i.subtotal })), total: this.total, amount_paid: this.amount_paid, change_amount: this.change, cashier_name: 'Offline', customer_name: this.customer_id ? 'Saved' : null, created_at: new Date().toISOString(), offline: true };
-                this.saleError = '';
-            } catch(e) { this.saleError = 'Failed to save offline'; }
+                const sale = await sync.saveSale(saleData);
+                // Deduct stock locally
+                for (const item of this.cart) {
+                    // Update products in IndexedDB
+                    try {
+                        const p = await db.get('products', item.product_id);
+                        if (p) { p.stock = Math.max(0, p.stock - item.quantity); await db.put('products', p); }
+                    } catch(e) {}
+                }
+                this.receipt = {
+                    invoice_no: sale.synced ? sale.invoice_no : 'SYNCING',
+                    items: this.cart.map(i => ({ product_name: i.name, quantity: i.quantity, subtotal: i.subtotal })),
+                    total: this.total, amount_paid: this.amount_paid,
+                    change_amount: this.change, cashier_name: 'Cashier',
+                    customer_name: this.customer_id ? 'Saved' : null,
+                    created_at: new Date().toISOString(),
+                    pending: !sale.synced,
+                };
+            } catch(e) {
+                this.saleError = 'Failed to save sale: ' + e.message;
+            }
             this.saleLoading = false;
         },
     },
     async created() {
-        const me = await apiJson('/api/auth/me');
-        if (me.success) { this.stores = me.data.stores || []; const cachedStore = localStorage.getItem('store_id'); if (cachedStore) this.currentStore = me.data.stores.find(s => s.id == cachedStore) || null; }
+        // Read stores from IndexedDB if available, fall back to auth/me
+        try {
+            const s = await db.getAll('stores');
+            if (s.length) this.stores = s;
+        } catch(e) {}
+        if (!this.stores.length) {
+            const me = await apiJson('/api/auth/me');
+            if (me.success) this.stores = me.data.stores || [];
+        }
+        const cachedStore = localStorage.getItem('store_id');
+        if (cachedStore) this.currentStore = this.stores.find(s => s.id == cachedStore) || null;
         if (this.currentStore) await this.loadInit(); else this.pageLoading = false;
     },
 };
@@ -276,13 +313,16 @@ const Products = {
     methods: {
         fmt: fmtMoney,
         async load() {
-            const params = new URLSearchParams(); if (this.search) params.set('search', this.search);
-            if (!this.search) { const c = mikoCache.get('products'); if (c) { this.items = c; this.loading = false; } }
-            const res = await apiJson('/api/products?' + params);
-            if (res.success) { this.items = res.data; if (!this.search) mikoCache.set('products', res.data, 300000); }
+            this.loading = true;
+            // Read from IndexedDB instantly
+            try {
+                let all = await db.getAll('products');
+                if (this.search) { const q = this.search.toLowerCase(); all = all.filter(p => p.name.toLowerCase().includes(q) || (p.sku||'').toLowerCase().includes(q)); }
+                this.items = all;
+            } catch(e) {}
             this.loading = false;
         },
-        async remove(id) { if (!confirm('Delete?')) return; await apiDelete('/api/products/'+id); mikoCache.remove('products'); this.load(); },
+        async remove(id) { if (!confirm('Delete?')) return; await apiDelete('/api/products/'+id); this.load(); },
     },
     created() { this.load(); },
 };
@@ -347,9 +387,7 @@ const Categories = {
     methods: {
         openForm(cat) { this.editing = !!cat; this.form = cat ? { id: cat.id, name: cat.name } : { name: '' }; this.showForm = true; },
         async load() {
-            const cached = mikoCache.get('categories'); if (cached) { this.items = cached; this.pageLoading = false; }
-            const res = await apiJson('/api/categories');
-            if (res.success) { this.items = res.data; mikoCache.set('categories', res.data, 1800000); }
+            try { this.items = await db.getAll('categories'); } catch(e) {}
             this.pageLoading = false;
         },
         async save() {
@@ -358,10 +396,10 @@ const Categories = {
             const method = this.editing ? 'PUT' : 'POST';
             const res = await apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this.form) });
             const d = await res.json();
-            if (d.success) { mikoCache.remove('categories'); this.showForm = false; this.load(); }
+            if (d.success) { this.showForm = false; this.load(); }
             this.loading = false;
         },
-        async remove(id) { if (!confirm('Delete?')) return; await apiDelete('/api/categories/'+id); mikoCache.remove('categories'); this.load(); },
+        async remove(id) { if (!confirm('Delete?')) return; await apiDelete('/api/categories/'+id); this.load(); },
     },
     created() { this.load(); },
 };
@@ -381,10 +419,11 @@ const Customers = {
         fmt: fmtMoney,
         openForm(c) { this.editing = !!c; this.form = c ? { id: c.id, name: c.name, phone: c.phone || '', email: c.email || '' } : { name: '', phone: '', email: '' }; this.showForm = true; },
         async load() {
-            const p = new URLSearchParams(); if (this.search) p.set('search', this.search);
-            if (!this.search) { const cached = mikoCache.get('customers'); if (cached) { this.items = cached; this.pageLoading = false; } }
-            const res = await apiJson('/api/customers?' + p);
-            if (res.success) { this.items = res.data; if (!this.search) mikoCache.set('customers', res.data, 600000); }
+            try {
+                let all = await db.getAll('customers');
+                if (this.search) { const q = this.search.toLowerCase(); all = all.filter(c => c.name.toLowerCase().includes(q)); }
+                this.items = all;
+            } catch(e) {}
             this.pageLoading = false;
         },
         async save() {
@@ -392,7 +431,7 @@ const Customers = {
             const method = this.editing ? 'PUT' : 'POST';
             const res = await apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this.form) });
             const d = await res.json();
-            if (d.success) { mikoCache.remove('customers'); this.showForm = false; this.load(); }
+            if (d.success) { this.showForm = false; this.load(); }
         },
     },
     created() { this.load(); },
@@ -412,7 +451,21 @@ const Sales = {
         fmt: fmtMoney,
         async load() {
             this.loading = true;
-            const p = new URLSearchParams(); if (this.search) p.set('search', this.search); if (this.from) p.set('from', this.from); if (this.to) p.set('to', this.to);
+            // Show local sales first
+            try {
+                const queue = await db.getAll('sales_queue');
+                this.items = queue.slice(-50).reverse().map(s => ({
+                    invoice_no: s.invoice_no || 'PENDING',
+                    created_at: s.created_at,
+                    total: s.total || 0,
+                    payment_method: s.payment_method || 'cash',
+                    status: s.synced ? 'completed' : 'pending',
+                    customer_name: s.customer_id ? 'Customer' : 'Walk-in',
+                    offline: true,
+                }));
+            } catch(e) {}
+            // Background: fetch server sales
+            const p = new URLSearchParams(); if (this.search) p.set('search', this.search);
             const res = await apiJson('/api/sales?' + p);
             if (res.success) this.items = res.data;
             this.loading = false;
@@ -463,9 +516,11 @@ const Reports = {
     data: () => ({ summary: { count: 0, total: 0 }, lowStock: [], loading: true }),
     methods: { fmt: fmtMoney },
     async created() {
-        const cached = mikoCache.get('reportStats'); if (cached) { this.summary = cached.today_sales || {}; this.lowStock = cached.low_stock || []; this.loading = false; }
-        const res = await apiJson('/api/dashboard/stats');
-        if (res.success) { const s = res.data; this.summary = s.today_sales || {}; this.lowStock = s.low_stock || []; mikoCache.set('reportStats', s, 120000); }
+        try {
+            const products = await db.getAll('products');
+            this.lowStock = products.filter(p => p.stock <= p.min_stock).slice(0, 5);
+            this.summary = { count: products.length, total: 0 };
+        } catch(e) {}
         this.loading = false;
     },
 };
@@ -561,6 +616,12 @@ const app = createApp({
                     localStorage.setItem('store_name', s.name);
                     this.storeId = s.id;
                     this.storeName = s.name;
+                    this.loadError = '';
+                    // Seed IndexedDB with all data
+                    try {
+                        await sync.seedAll();
+                        await sync.start();
+                    } catch(e) { this.loadError = 'Failed to load data: ' + e.message; }
                     this.$router.push('/');
                 }
             } catch(e) {
@@ -576,7 +637,8 @@ const app = createApp({
         this.storesLoading = false;
         if (this.authenticated) {
             sync.onChange((s) => { this.syncOnline = s.online; this.syncPending = s.pendingCount; });
-            sync.init();
+            // Check if already seeded (page refresh after initial load)
+            db.count('products').then(c => { if (c > 0) sync.start(); });
         }
     },
 });
