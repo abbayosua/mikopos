@@ -1,0 +1,7 @@
+{
+    "rewrites": [
+        { "source": "/assets/(.*)", "destination": "/public/assets/$1" },
+        { "source": "/api/(.*)", "destination": "/api/$1" },
+        { "source": "/(.*)", "destination": "/index.php" }
+    ]
+}
