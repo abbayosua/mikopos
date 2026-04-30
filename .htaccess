@@ -4,12 +4,17 @@ RewriteEngine On
 RewriteCond %{HTTP:Authorization} ^(.+)$
 RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
+# Rewrite /assets/* to /public/assets/*
+RewriteRule ^assets/(.*)$ public/assets/$1 [L]
+
+# Route /api/* to api/*.php files (if they exist)
+RewriteCond %{REQUEST_URI} ^/api/(.+)$
+RewriteCond %{DOCUMENT_ROOT}/api/%1.php -f
+RewriteRule ^api/(.+)$ api/$1.php [L]
+
 # Remove trailing slash for non-directory requests
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^(.+)/$ /$1 [L,R=301]
-
-# Serve static assets directly
-RewriteRule ^assets/ - [L]
 
 # Route everything else to index.php
 RewriteCond %{REQUEST_FILENAME} !-f

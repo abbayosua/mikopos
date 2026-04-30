@@ -1,6 +1,13 @@
 {
+    "functions": {
+        "api/*.php": {
+            "runtime": "vercel-php@0.7.3"
+        }
+    },
     "rewrites": [
         { "source": "/assets/(.*)", "destination": "/public/assets/$1" },
+        { "source": "/api/migrate", "destination": "/api/migrate.php" },
+        { "source": "/api/(.*)", "destination": "/api/index.php" },
         { "source": "/(.*)", "destination": "/api/index.php" }
     ]
 }
