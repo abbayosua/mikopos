@@ -26,7 +26,9 @@
                 <i class="fas fa-store text-6xl text-indigo-300 mb-4"></i>
                 <h2 class="text-xl font-bold mb-2">Select a Store</h2>
                 <p class="text-gray-500 mb-6">Choose a store to start working.</p>
-                <div v-if="!stores.length" class="py-4"><i class="fas fa-spinner fa-pulse text-xl text-indigo-800 mr-2"></i>Loading stores...</div>
+                <div v-if="storesLoading" class="py-4"><i class="fas fa-spinner fa-pulse text-xl text-indigo-800 mr-2"></i>Loading stores...</div>
+                <div v-else-if="loadError" class="py-4 text-red-600 text-sm">{{ loadError }}</div>
+                <div v-else-if="stores.length === 0" class="py-4 text-gray-500">No stores found. <a href="/logout" class="text-indigo-600">Logout</a></div>
                 <div v-else class="space-y-2">
                     <button v-for="s in stores" :key="s.id" @click="selectStore(s)" class="w-full bg-indigo-800 text-white py-3 rounded-lg hover:bg-indigo-900 font-medium">
                         <i class="fas fa-store mr-2"></i>{{ s.name }}

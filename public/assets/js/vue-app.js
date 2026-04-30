@@ -524,6 +524,8 @@ const app = createApp({
         storeName: localStorage.getItem('store_name') || '',
         storeId: localStorage.getItem('store_id') || null,
         stores: [],
+        storesLoading: true,
+        loadError: '',
     }),
     methods: {
         logout() {
@@ -545,16 +547,19 @@ const app = createApp({
                     this.$router.push('/');
                 }
             } catch(e) {
-                alert('Failed to select store: ' + e.message);
+                this.loadError = 'Failed: ' + e.message;
             }
         },
-        async fetchStores() {
-            const d = await apiJson('/api/stores/mine');
-            if (d.success) this.stores = d.data;
-        },
     },
-    async mounted() {
-        if (this.authenticated) await this.fetchStores();
+    created() {
+        if (this.authenticated && !this.storeId) {
+            apiJson('/api/stores/mine').then(d => {
+                if (d.success) { this.stores = d.data; }
+                this.storesLoading = false;
+            }).catch(() => { this.storesLoading = false; });
+        } else {
+            this.storesLoading = false;
+        }
     },
 });
 
