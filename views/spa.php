@@ -65,7 +65,7 @@
                         <i class="fas fa-store w-5 text-center"></i>
                         <span v-show="sidebarOpen">Stores</span>
                     </router-link>
-                    <a href="/logout" class="flex items-center gap-3 px-3 py-2 rounded hover:bg-red-600">
+                    <a href="#" @click.prevent="logout" class="flex items-center gap-3 px-3 py-2 rounded hover:bg-red-600">
                         <i class="fas fa-sign-out-alt w-5 text-center"></i>
                         <span v-show="sidebarOpen">Logout</span>
                     </a>

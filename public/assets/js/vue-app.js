@@ -523,8 +523,13 @@ const app = createApp({
         authenticated: !!localStorage.getItem('token'),
         storeName: localStorage.getItem('store_name') || '',
     }),
-    watch: {
-        '$route'() { if (this.$route.path === '/logout') { localStorage.removeItem('token'); localStorage.removeItem('store_id'); this.authenticated = false; this.$router.push('/login'); } },
+    methods: {
+        logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('store_id');
+            this.authenticated = false;
+            this.$router.push('/login');
+        },
     },
 });
 
