@@ -60,7 +60,7 @@ function sales() {
             if (this.search) params.set('search', this.search);
             if (this.from) params.set('from', this.from);
             if (this.to) params.set('to', this.to);
-            const res = await fetch('/api/sales?' + params);
+            const res = await apiFetch('/api/sales?' + params);
             const data = await res.json();
             if (data.success) this.items = data.data;
         },

@@ -90,7 +90,7 @@ function customers() {
         async load() {
             const params = new URLSearchParams();
             if (this.search) params.set('search', this.search);
-            const res = await fetch('/api/customers?' + params);
+            const res = await apiFetch('/api/customers?' + params);
             const data = await res.json();
             if (data.success) this.items = data.data;
         },
@@ -104,7 +104,7 @@ function customers() {
             try {
                 const url = this.editing ? '/api/customers/' + this.form.id : '/api/customers';
                 const method = this.editing ? 'PUT' : 'POST';
-                const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this.form) });
+                const res = await apiFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this.form) });
                 const data = await res.json();
                 if (data.success) { this.showModal = false; this.editing = false; this.form = { name: '', phone: '', email: '', address: '' }; this.load(); }
                 else this.error = data.message;
@@ -113,7 +113,7 @@ function customers() {
         },
         async remove(id) {
             if (!confirm('Delete this customer?')) return;
-            const res = await fetch('/api/customers/' + id, { method: 'DELETE' });
+            const res = await apiFetch('/api/customers/' + id, { method: 'DELETE' });
             if ((await res.json()).success) this.load();
         },
         formatMoney(n) { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(n || 0); }

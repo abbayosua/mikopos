@@ -102,7 +102,7 @@ function reports() {
         lowStock: [],
         recentSales: [],
         async load() {
-            const res = await fetch('/api/dashboard/stats');
+            const res = await apiFetch('/api/dashboard/stats');
             const data = await res.json();
             if (data.success) {
                 const s = data.data;
@@ -111,12 +111,12 @@ function reports() {
                 this.recentSales = s.recent_sales || [];
             }
 
-            const res2 = await fetch('/api/sales?limit=50');
+            const res2 = await apiFetch('/api/sales?limit=50');
             const data2 = await res2.json();
             if (data2.success) {
                 const productMap = {};
                 for (const sale of data2.data) {
-                    const detailRes = await fetch('/api/sales/' + sale.id);
+                    const detailRes = await apiFetch('/api/sales/' + sale.id);
                     const detailData = await detailRes.json();
                     if (detailData.success && detailData.data.items) {
                         for (const item of detailData.data.items) {

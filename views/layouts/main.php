@@ -94,7 +94,7 @@
         return {
             storeName: '',
             async load() {
-                const res = await fetch('/api/stores/current');
+                const res = await apiFetch('/api/stores/current');
                 const data = await res.json();
                 if (data.success && data.data) this.storeName = 'Store: ' + data.data.name;
                 else this.storeName = '';

@@ -134,7 +134,7 @@ function dashboard() {
     return {
         stats: {},
         async load() {
-            const res = await fetch('/api/dashboard/stats');
+            const res = await apiFetch('/api/dashboard/stats');
             const data = await res.json();
             if (data.success) this.stats = data.data;
         },

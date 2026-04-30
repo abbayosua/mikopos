@@ -70,7 +70,7 @@ function categories() {
         loading: false,
         error: '',
         async load() {
-            const res = await fetch('/api/categories');
+            const res = await apiFetch('/api/categories');
             const data = await res.json();
             if (data.success) this.items = data.data;
         },
@@ -85,7 +85,7 @@ function categories() {
             try {
                 const url = this.editing ? '/api/categories/' + this.form.id : '/api/categories';
                 const method = this.editing ? 'PUT' : 'POST';
-                const res = await fetch(url, {
+                const res = await apiFetch(url, {
                     method,
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(this.form)
@@ -107,7 +107,7 @@ function categories() {
         },
         async remove(id) {
             if (!confirm('Delete this category?')) return;
-            const res = await fetch('/api/categories/' + id, { method: 'DELETE' });
+            const res = await apiFetch('/api/categories/' + id, { method: 'DELETE' });
             const data = await res.json();
             if (data.success) this.load();
         }

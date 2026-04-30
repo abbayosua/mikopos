@@ -38,17 +38,22 @@ function loginForm() {
         password: '',
         loading: false,
         error: '',
+        init() {
+            localStorage.removeItem('token');
+        },
         async submit() {
             this.loading = true;
             this.error = '';
             try {
-                const res = await fetch('/api/auth/login', {
+                const res = await apiFetch('/api/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email: this.email, password: this.password })
                 });
                 const data = await res.json();
                 if (data.success) {
+                    localStorage.setItem('token', data.data.token);
+                    if (data.data.store) localStorage.setItem('store_id', data.data.store.id);
                     window.location.href = '/';
                 } else {
                     this.error = data.message || 'Login failed';

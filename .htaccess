@@ -1,5 +1,9 @@
 RewriteEngine On
 
+# Pass Authorization header to PHP (needed for JWT)
+RewriteCond %{HTTP:Authorization} ^(.+)$
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
 # Remove trailing slash for non-directory requests
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^(.+)/$ /$1 [L,R=301]

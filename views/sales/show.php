@@ -122,13 +122,13 @@ function saleDetail() {
     return {
         sale: null,
         async load(id) {
-            const res = await fetch('/api/sales/' + id);
+            const res = await apiFetch('/api/sales/' + id);
             const data = await res.json();
             if (data.success) this.sale = data.data;
         },
         async voidSale(id) {
             if (!confirm('Void this sale? This will restore stock.')) return;
-            const res = await fetch('/api/sales/' + id, { method: 'DELETE' });
+            const res = await apiFetch('/api/sales/' + id, { method: 'DELETE' });
             const data = await res.json();
             if (data.success) window.location.reload();
         },

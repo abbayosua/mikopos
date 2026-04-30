@@ -62,13 +62,13 @@ function products() {
         async load() {
             const params = new URLSearchParams();
             if (this.search) params.set('search', this.search);
-            const res = await fetch('/api/products?' + params);
+            const res = await apiFetch('/api/products?' + params);
             const data = await res.json();
             if (data.success) this.products = data.data;
         },
         async remove(id) {
             if (!confirm('Delete this product?')) return;
-            const res = await fetch('/api/products/' + id, { method: 'DELETE' });
+            const res = await apiFetch('/api/products/' + id, { method: 'DELETE' });
             const data = await res.json();
             if (data.success) this.load();
         },

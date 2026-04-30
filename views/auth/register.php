@@ -54,7 +54,7 @@ function registerForm() {
             this.loading = true;
             this.error = '';
             try {
-                const res = await fetch('/api/auth/register', {
+                const res = await apiFetch('/api/auth/register', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -66,6 +66,7 @@ function registerForm() {
                 });
                 const data = await res.json();
                 if (data.success) {
+                    localStorage.setItem('token', data.data.token);
                     window.location.href = '/';
                 } else {
                     this.error = data.message || 'Registration failed';

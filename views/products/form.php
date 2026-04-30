@@ -139,11 +139,11 @@ function productForm() {
             if (id) {
                 this.editing = true;
                 this.productId = id;
-                const res = await fetch('/api/products/' + id);
+                const res = await apiFetch('/api/products/' + id);
                 const data = await res.json();
                 if (data.success) this.form = data.data;
             }
-            const catRes = await fetch('/api/categories');
+            const catRes = await apiFetch('/api/categories');
             const catData = await catRes.json();
             if (catData.success) this.categories = catData.data;
         },
@@ -158,7 +158,7 @@ function productForm() {
         async doLookup(barcode) {
             this.lookupLoading = true;
             try {
-                const res = await fetch('/api/products/lookup?barcode=' + encodeURIComponent(barcode));
+                const res = await apiFetch('/api/products/lookup?barcode=' + encodeURIComponent(barcode));
                 const data = await res.json();
                 if (data.success && data.data) {
                     const p = data.data;
@@ -250,7 +250,7 @@ function productForm() {
             try {
                 const url = this.editing ? '/api/products/' + this.productId : '/api/products';
                 const method = this.editing ? 'PUT' : 'POST';
-                const res = await fetch(url, {
+                const res = await apiFetch(url, {
                     method,
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(this.form)

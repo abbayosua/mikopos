@@ -88,8 +88,8 @@ function stores() {
         error: '',
         async load() {
             const [allRes, curRes] = await Promise.all([
-                fetch('/api/stores'),
-                fetch('/api/auth/me')
+                apiFetch('/api/stores'),
+                apiFetch('/api/auth/me')
             ]);
             const all = await allRes.json();
             const cur = await curRes.json();
@@ -106,7 +106,7 @@ function stores() {
             try {
                 const url = this.editing ? '/api/stores/' + this.form.id : '/api/stores';
                 const method = this.editing ? 'PUT' : 'POST';
-                const res = await fetch(url, {
+                const res = await apiFetch(url, {
                     method, headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(this.form)
                 });
@@ -117,12 +117,12 @@ function stores() {
             finally { this.loading = false; }
         },
         async switchStore(store) {
-            const res = await fetch('/api/stores/switch', {
+            const res = await apiFetch('/api/stores/switch', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ store_id: store.id })
             });
             const data = await res.json();
-            if (data.success) { this.currentStore = store; this.load(); window.location.reload(); }
+            if (data.success) { this.currentStore = store; localStorage.setItem('store_id', store.id); this.load(); window.location.reload(); }
         }
     }
 }

@@ -268,7 +268,7 @@ function pos() {
         receipt: {},
 
         async init() {
-            const meRes = await fetch('/api/auth/me');
+            const meRes = await apiFetch('/api/auth/me');
             const me = await meRes.json();
             if (me.success) {
                 this.stores = me.data.stores || [];
@@ -280,7 +280,7 @@ function pos() {
         },
 
         async selectStore(storeId) {
-            const res = await fetch('/api/stores/switch', {
+            const res = await apiFetch('/api/stores/switch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ store_id: storeId })
@@ -288,6 +288,7 @@ function pos() {
             const data = await res.json();
             if (data.success) {
                 this.currentStore = data.data.store;
+                localStorage.setItem('store_id', storeId);
                 await this.searchProducts();
             }
         },
@@ -353,7 +354,7 @@ function pos() {
 
         async scanBarcode() {
             if (!this.barcode.trim()) return;
-            const res = await fetch('/api/products/search?q=' + encodeURIComponent(this.barcode.trim()));
+            const res = await apiFetch('/api/products/search?q=' + encodeURIComponent(this.barcode.trim()));
             const data = await res.json();
             if (data.success && data.data.length === 1) {
                 this.addToCart(data.data[0]);
@@ -372,13 +373,13 @@ function pos() {
         },
 
         async loadCategories() {
-            const res = await fetch('/api/categories');
+            const res = await apiFetch('/api/categories');
             const data = await res.json();
             if (data.success) this.categories = data.data;
         },
 
         async loadCustomers() {
-            const res = await fetch('/api/customers');
+            const res = await apiFetch('/api/customers');
             const data = await res.json();
             if (data.success) this.customers = data.data;
         },
@@ -387,7 +388,7 @@ function pos() {
             const params = new URLSearchParams();
             if (this.search) params.set('search', this.search);
             if (this.categoryFilter) params.set('category_id', this.categoryFilter);
-            const res = await fetch('/api/products?' + params);
+            const res = await apiFetch('/api/products?' + params);
             const data = await res.json();
             if (data.success) this.products = data.data;
         },
@@ -443,7 +444,7 @@ function pos() {
             this.loading = true;
             this.error = '';
             try {
-                const res = await fetch('/api/sales', {
+                const res = await apiFetch('/api/sales', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

@@ -4,6 +4,14 @@ namespace Miko;
 
 class Auth
 {
+    private static ?array $jwtPayload = null;
+    private static ?int $requestStoreId = null;
+
+    public static function setRequestStoreId(?int $id): void
+    {
+        self::$requestStoreId = $id;
+    }
+
     public static function attempt(string $email, string $password): ?array
     {
         $user = Database::fetch(
@@ -30,40 +38,57 @@ class Auth
 
     public static function check(): bool
     {
-        return Session::has('user_id');
-    }
-
-    public static function user(): ?array
-    {
-        if (!self::check()) {
-            return null;
-        }
-
-        return Database::fetch(
-            'SELECT id, tenant_id, name, email, role, is_active, created_at
-             FROM users WHERE id = :id',
-            ['id' => Session::get('user_id')]
-        );
+        if (Session::has('user_id')) return true;
+        if (self::resolveJwt()) return true;
+        return false;
     }
 
     public static function id(): ?int
     {
-        return Session::get('user_id');
+        if (Session::has('user_id')) return Session::get('user_id');
+        if (self::resolveJwt()) return self::$jwtPayload['user_id'];
+        return null;
     }
 
     public static function tenantId(): ?int
     {
-        return Session::get('tenant_id');
+        if (Session::has('tenant_id')) return Session::get('tenant_id');
+        if (self::resolveJwt()) return self::$jwtPayload['tenant_id'];
+        return null;
     }
 
     public static function tenantName(): ?string
     {
-        return Session::get('tenant_name');
+        if (Session::has('tenant_name')) return Session::get('tenant_name');
+        if (self::resolveJwt()) return self::$jwtPayload['tenant_name'];
+        return null;
     }
 
     public static function userRole(): ?string
     {
-        return Session::get('user_role');
+        if (Session::has('user_role')) return Session::get('user_role');
+        if (self::resolveJwt()) return self::$jwtPayload['role'];
+        return null;
+    }
+
+    public static function storeId(): ?int
+    {
+        if (self::$requestStoreId !== null) return self::$requestStoreId;
+        if (Session::has('store_id')) return Session::get('store_id');
+        if (self::resolveJwt()) return self::$jwtPayload['store_id'] ?? null;
+        return null;
+    }
+
+    public static function storeName(): ?string
+    {
+        if (Session::has('store_name')) return Session::get('store_name');
+        if (self::resolveJwt()) return self::$jwtPayload['store_name'] ?? null;
+        return null;
+    }
+
+    public static function hasStore(): bool
+    {
+        return self::storeId() !== null;
     }
 
     public static function isAdmin(): bool
@@ -71,19 +96,16 @@ class Auth
         return self::userRole() === 'admin';
     }
 
-    public static function storeId(): ?int
+    public static function user(): ?array
     {
-        return Session::get('store_id');
-    }
+        $uid = self::id();
+        if (!$uid) return null;
 
-    public static function storeName(): ?string
-    {
-        return Session::get('store_name');
-    }
-
-    public static function hasStore(): bool
-    {
-        return Session::has('store_id');
+        return Database::fetch(
+            'SELECT id, tenant_id, name, email, role, is_active, created_at
+             FROM users WHERE id = :id',
+            ['id' => $uid]
+        );
     }
 
     public static function logout(): void
@@ -100,5 +122,19 @@ class Auth
             }
             Response::redirect('/login');
         }
+    }
+
+    private static function resolveJwt(): bool
+    {
+        if (self::$jwtPayload !== null) return true;
+
+        $token = JWTAuth::getTokenFromHeaders();
+        if (!$token) return false;
+
+        $payload = JWTAuth::decode($token);
+        if (!$payload) return false;
+
+        self::$jwtPayload = $payload;
+        return true;
     }
 }

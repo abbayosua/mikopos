@@ -26,6 +26,11 @@ $router->before('GET|POST|PUT|DELETE', '/.*', function () {
     $publicPaths = ['/login', '/register', '/api/auth/login', '/api/auth/register'];
     $currentUri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
+    $storeHeader = $_SERVER['HTTP_X_STORE_ID'] ?? $_SERVER['X-Store-Id'] ?? '';
+    if ($storeHeader) {
+        Auth::setRequestStoreId((int) $storeHeader);
+    }
+
     $isApi = str_starts_with($currentUri, '/api/');
     $isPublic = in_array($currentUri, $publicPaths);
 
@@ -125,12 +130,26 @@ $router->post('/api/auth/login', function () {
         ['user_id' => $user['id']]
     );
 
+    $storeId = null;
+    $storeName = null;
     if (count($stores) === 1) {
-        Session::set('store_id', $stores[0]['id']);
-        Session::set('store_name', $stores[0]['name']);
+        $storeId = $stores[0]['id'];
+        $storeName = $stores[0]['name'];
+        Session::set('store_id', $storeId);
+        Session::set('store_name', $storeName);
     }
 
+    $token = \Miko\JWTAuth::encode([
+        'user_id'     => $user['id'],
+        'tenant_id'   => $user['tenant_id'],
+        'role'        => $user['role'],
+        'tenant_name' => $user['tenant_name'],
+        'store_id'    => $storeId,
+        'store_name'  => $storeName,
+    ]);
+
     Response::success([
+        'token' => $token,
         'user' => [
             'id'    => $user['id'],
             'name'  => $user['name'],
@@ -214,7 +233,17 @@ $router->post('/api/auth/register', function () {
         Session::set('store_id', $storeId);
         Session::set('store_name', $data['tenant_name'] . ' Main');
 
+        $token = \Miko\JWTAuth::encode([
+            'user_id'     => $userId,
+            'tenant_id'   => $tenantId,
+            'role'        => 'admin',
+            'tenant_name' => $data['tenant_name'],
+            'store_id'    => $storeId,
+            'store_name'  => $data['tenant_name'] . ' Main',
+        ]);
+
         Response::success([
+            'token'  => $token,
             'user'   => ['id' => $userId, 'name' => $data['name'], 'email' => $data['email'], 'role' => 'admin'],
             'tenant' => ['name' => $data['tenant_name'], 'slug' => $slug],
             'store'  => ['id' => $storeId, 'name' => $data['tenant_name'] . ' Main'],
