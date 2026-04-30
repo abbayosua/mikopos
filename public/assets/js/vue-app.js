@@ -121,6 +121,7 @@ const Dashboard = {
         fmt: fmtMoney,
         async refresh() {
             this.refreshing = true;
+            this.loading = true;
             try {
                 const products = await db.getAll('products');
                 const customers = await db.getAll('customers');
@@ -132,9 +133,9 @@ const Dashboard = {
                     today_sales: { count: salesQueue.filter(s => s.synced).length, total: 0 },
                     recent_sales: salesQueue.filter(s => s.synced).slice(-5).reverse(),
                 };
-                // Also trigger background sync
                 sync.syncNow();
             } catch(e) {}
+            this.loading = false;
             this.refreshing = false;
         },
     },
