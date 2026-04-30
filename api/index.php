@@ -48,21 +48,38 @@ try {
     }
 
     elseif ($uri === '/api/auth/register' && $method === 'POST') {
-        $data = Request::all();
+        $data = json_decode(file_get_contents('php://input'), true) ?: $_POST;
         $tenantName = $data['tenant_name'] ?? ''; $name = $data['name'] ?? ''; $email = $data['email'] ?? ''; $password = $data['password'] ?? '';
         if (!$tenantName || !$name || !$email || !$password) Response::error('All fields are required');
         if (strlen($password) < 6) Response::error('Password must be at least 6 characters');
 
-        if (Database::fetch('SELECT id FROM tenants WHERE slug = :slug', ['slug' => strtolower(str_replace(' ', '-', $tenantName))])) Response::error('Business name already registered', 422);
-        if (Database::fetch('SELECT id FROM users WHERE email = :email', ['email' => $email])) Response::error('Email already registered', 422);
+        $pdo = Database::getInstance()->getConnection();
 
-        $pdo = Database::getInstance()->getConnection(); $pdo->beginTransaction();
+        $existing = $pdo->prepare("SELECT id FROM tenants WHERE slug = ?");
+        $existing->execute([strtolower(str_replace(' ', '-', $tenantName))]);
+        if ($existing->fetch()) Response::error('Business name already registered', 422);
+
+        $existing2 = $pdo->prepare("SELECT id FROM users WHERE email = ?");
+        $existing2->execute([$email]);
+        if ($existing2->fetch()) Response::error('Email already registered', 422);
+
+        $pdo->beginTransaction();
         try {
             $slug = strtolower(str_replace(' ', '-', $tenantName)) . '-' . uniqid();
-            $tenantId = Database::insert('tenants', ['name' => $tenantName, 'slug' => $slug, 'email' => $email]);
-            $userId = Database::insert('users', ['tenant_id' => $tenantId, 'name' => $name, 'email' => $email, 'password' => password_hash($password, PASSWORD_BCRYPT), 'role' => 'admin']);
-            $storeId = Database::insert('stores', ['tenant_id' => $tenantId, 'name' => $tenantName . ' Main', 'code' => 'MAIN']);
-            Database::insert('user_stores', ['user_id' => $userId, 'store_id' => $storeId]);
+            $hash = password_hash($password, PASSWORD_BCRYPT);
+
+            $q1 = $pdo->prepare("INSERT INTO tenants (name, slug, email) VALUES (?,?,?) RETURNING id");
+            $q1->execute([$tenantName, $slug, $email]); $tenantId = (int)$q1->fetchColumn();
+
+            $q2 = $pdo->prepare("INSERT INTO users (tenant_id, name, email, password, role) VALUES (?,?,?,?,?) RETURNING id");
+            $q2->execute([$tenantId, $name, $email, $hash, 'admin']); $userId = (int)$q2->fetchColumn();
+
+            $q3 = $pdo->prepare("INSERT INTO stores (tenant_id, name, code) VALUES (?,?,?) RETURNING id");
+            $q3->execute([$tenantId, $tenantName.' Main', 'MAIN']); $storeId = (int)$q3->fetchColumn();
+
+            $q4 = $pdo->prepare("INSERT INTO user_stores (user_id, store_id) VALUES (?,?)");
+            $q4->execute([$userId, $storeId]);
+
             $pdo->commit();
             Auth::attempt($email, $password); Session::set('store_id', $storeId); Session::set('store_name', $tenantName . ' Main');
             $token = \Miko\JWTAuth::encode(['user_id' => $userId, 'tenant_id' => $tenantId, 'role' => 'admin', 'tenant_name' => $tenantName, 'store_id' => $storeId, 'store_name' => $tenantName . ' Main']);
