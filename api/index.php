@@ -5,190 +5,297 @@ require_once __DIR__ . '/../vendor/autoload.php';
 $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
 $dotenv->safeLoad();
 
-use Miko\Router;
 use Miko\Auth;
-use Miko\Response;
 use Miko\Database;
 use Miko\Request;
+use Miko\Response;
 use Miko\Session;
 
 Session::start();
 
-$uri = $_SERVER['REQUEST_URI'] ?? '';
-if (str_starts_with($uri, '/api/')) {
-    ini_set('display_errors', '0');
+$uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
+ini_set('display_errors', '0');
+header('Content-Type: application/json');
+
+// Handle CORS / preflight
+if ($method === 'OPTIONS') {
+    http_response_code(204); exit;
 }
 
-$router = Router::init();
-
-$router->before('GET|POST|PUT|DELETE', '/.*', function () {
-    $publicPaths = ['/login', '/register', '/api/auth/login', '/api/auth/register'];
-    $currentUri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-
+// Auth helper
+function auth(): void {
     $storeHeader = $_SERVER['HTTP_X_STORE_ID'] ?? $_SERVER['X-Store-Id'] ?? '';
-    if ($storeHeader) {
-        Auth::setRequestStoreId((int) $storeHeader);
+    if ($storeHeader) Auth::setRequestStoreId((int) $storeHeader);
+    Auth::requireAuth();
+}
+
+try {
+    // === AUTH ===
+    if ($uri === '/api/auth/login' && $method === 'POST') {
+        $data = json_decode(file_get_contents('php://input'), true) ?: $_POST;
+        $email = $data['email'] ?? ''; $password = $data['password'] ?? '';
+        if (!$email || !$password) Response::error('Email and password are required');
+
+        $user = Auth::attempt($email, $password);
+        if (!$user) Response::error('Invalid email or password', 401);
+
+        $stores = Database::fetchAll('SELECT s.* FROM stores s JOIN user_stores us ON us.store_id = s.id WHERE us.user_id = :user_id AND s.is_active = true', ['user_id' => $user['id']]);
+        $storeId = null; $storeName = null;
+        if (count($stores) === 1) { $storeId = $stores[0]['id']; $storeName = $stores[0]['name']; Session::set('store_id', $storeId); Session::set('store_name', $storeName); }
+        $token = \Miko\JWTAuth::encode(['user_id' => $user['id'], 'tenant_id' => $user['tenant_id'], 'role' => $user['role'], 'tenant_name' => $user['tenant_name'], 'store_id' => $storeId, 'store_name' => $storeName]);
+        Response::success(['token' => $token, 'user' => ['id' => $user['id'], 'name' => $user['name'], 'email' => $user['email'], 'role' => $user['role']], 'tenant' => ['name' => $user['tenant_name'], 'slug' => $user['tenant_slug']], 'stores' => $stores, 'store' => count($stores) === 1 ? $stores[0] : null], 'Login successful');
     }
 
-    $isApi = str_starts_with($currentUri, '/api/');
-    $isPublic = in_array($currentUri, $publicPaths);
+    elseif ($uri === '/api/auth/register' && $method === 'POST') {
+        $data = Request::all();
+        $tenantName = $data['tenant_name'] ?? ''; $name = $data['name'] ?? ''; $email = $data['email'] ?? ''; $password = $data['password'] ?? '';
+        if (!$tenantName || !$name || !$email || !$password) Response::error('All fields are required');
+        if (strlen($password) < 6) Response::error('Password must be at least 6 characters');
 
-    if (!$isApi && !$isPublic && !Auth::check()) {
-        http_response_code(401);
-        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-        exit;
-    }
-});
+        if (Database::fetch('SELECT id FROM tenants WHERE slug = :slug', ['slug' => strtolower(str_replace(' ', '-', $tenantName))])) Response::error('Business name already registered', 422);
+        if (Database::fetch('SELECT id FROM users WHERE email = :email', ['email' => $email])) Response::error('Email already registered', 422);
 
-// Auth routes
-$router->get('/api/debug', function () {
-    Response::success(['routes_loaded' => true, 'uri' => $_SERVER['REQUEST_URI']]);
-});
-
-$router->post('/api/auth/login', function () {
-    $data = Request::all();
-    $email = $data['email'] ?? '';
-    $password = $data['password'] ?? '';
-
-    if (!$email || !$password) {
-        Response::error('Email and password are required');
-    }
-
-    $user = Auth::attempt($email, $password);
-    if (!$user) {
-        Response::error('Invalid email or password', 401);
+        $pdo = Database::getInstance()->getConnection(); $pdo->beginTransaction();
+        try {
+            $slug = strtolower(str_replace(' ', '-', $tenantName)) . '-' . uniqid();
+            $tenantId = Database::insert('tenants', ['name' => $tenantName, 'slug' => $slug, 'email' => $email]);
+            $userId = Database::insert('users', ['tenant_id' => $tenantId, 'name' => $name, 'email' => $email, 'password' => password_hash($password, PASSWORD_BCRYPT), 'role' => 'admin']);
+            $storeId = Database::insert('stores', ['tenant_id' => $tenantId, 'name' => $tenantName . ' Main', 'code' => 'MAIN']);
+            Database::insert('user_stores', ['user_id' => $userId, 'store_id' => $storeId]);
+            $pdo->commit();
+            Auth::attempt($email, $password); Session::set('store_id', $storeId); Session::set('store_name', $tenantName . ' Main');
+            $token = \Miko\JWTAuth::encode(['user_id' => $userId, 'tenant_id' => $tenantId, 'role' => 'admin', 'tenant_name' => $tenantName, 'store_id' => $storeId, 'store_name' => $tenantName . ' Main']);
+            Response::success(['token' => $token, 'user' => ['id' => $userId, 'name' => $name, 'email' => $email, 'role' => 'admin'], 'tenant' => ['name' => $tenantName, 'slug' => $slug], 'store' => ['id' => $storeId, 'name' => $tenantName . ' Main']], 'Registration successful');
+        } catch (\Exception $e) { $pdo->rollBack(); Response::error('Registration failed: ' . $e->getMessage(), 500); }
     }
 
-    $stores = Database::fetchAll(
-        'SELECT s.* FROM stores s JOIN user_stores us ON us.store_id = s.id WHERE us.user_id = :user_id AND s.is_active = true',
-        ['user_id' => $user['id']]
-    );
-
-    $storeId = null; $storeName = null;
-    if (count($stores) === 1) {
-        $storeId = $stores[0]['id']; $storeName = $stores[0]['name'];
-        Session::set('store_id', $storeId); Session::set('store_name', $storeName);
+    elseif ($uri === '/api/auth/me' && $method === 'GET') {
+        auth(); $user = Auth::user();
+        $stores = Database::fetchAll('SELECT s.* FROM stores s JOIN user_stores us ON us.store_id = s.id WHERE us.user_id = :user_id AND s.is_active = true', ['user_id' => Auth::id()]);
+        Response::success(['user' => $user, 'tenant' => ['name' => Auth::tenantName()], 'stores' => $stores, 'store' => Auth::hasStore() ? ['id' => Auth::storeId(), 'name' => Auth::storeName()] : null]);
     }
 
-    $token = \Miko\JWTAuth::encode([
-        'user_id' => $user['id'], 'tenant_id' => $user['tenant_id'], 'role' => $user['role'],
-        'tenant_name' => $user['tenant_name'], 'store_id' => $storeId, 'store_name' => $storeName,
-    ]);
+    // === DASHBOARD ===
+    elseif ($uri === '/api/dashboard/stats' && $method === 'GET') {
+        auth(); $tid = Auth::tenantId(); $today = date('Y-m-d'); $month = date('Y-m');
+        $ts = Database::fetch("SELECT COUNT(*) as c, COALESCE(SUM(total),0) as t FROM sales WHERE tenant_id=:t AND created_at::date=:d AND status='completed'", ['t'=>$tid,'d'=>$today]);
+        $ms = Database::fetch("SELECT COUNT(*) as c, COALESCE(SUM(total),0) as t FROM sales WHERE tenant_id=:t AND to_char(created_at,'YYYY-MM')=:m AND status='completed'", ['t'=>$tid,'m'=>$month]);
+        $pc = Database::fetch('SELECT COUNT(*) as c FROM products WHERE tenant_id=:t',['t'=>$tid])['c']??0;
+        $cc = Database::fetch('SELECT COUNT(*) as c FROM customers WHERE tenant_id=:t',['t'=>$tid])['c']??0;
+        $sid = Auth::storeId();
+        if ($sid) {
+            $ls = Database::fetchAll('SELECT p.id,p.name,p.sku,ps.stock,ps.min_stock FROM products p JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.tenant_id=:t AND p.is_active=true AND ps.stock<=ps.min_stock ORDER BY ps.stock LIMIT 5',['t'=>$tid,'s'=>$sid]);
+            $rs = Database::fetchAll('SELECT s.id,s.invoice_no,s.total,s.created_at,c.name as customer_name FROM sales s LEFT JOIN customers c ON c.id=s.customer_id WHERE s.tenant_id=:t AND s.store_id=:s ORDER BY s.created_at DESC LIMIT 5',['t'=>$tid,'s'=>$sid]);
+        } else { $ls = []; $rs = []; }
+        Response::success(['today_sales'=>$ts,'month_sales'=>$ms,'product_count'=>$pc,'customer_count'=>$cc,'low_stock'=>$ls,'recent_sales'=>$rs]);
+    }
 
-    Response::success([
-        'token' => $token,
-        'user' => ['id' => $user['id'], 'name' => $user['name'], 'email' => $user['email'], 'role' => $user['role']],
-        'tenant' => ['name' => $user['tenant_name'], 'slug' => $user['tenant_slug']],
-        'stores' => $stores, 'store' => count($stores) === 1 ? $stores[0] : null,
-    ], 'Login successful');
-});
+    // === CATEGORIES ===
+    elseif ($uri === '/api/categories' && $method === 'GET') {
+        auth(); Response::success(Database::fetchAll('SELECT c.*,(SELECT COUNT(*) FROM products p WHERE p.category_id=c.id) as product_count FROM categories c WHERE c.tenant_id=:t ORDER BY c.name',['t'=>Auth::tenantId()]));
+    }
+    elseif ($uri === '/api/categories' && $method === 'POST') {
+        auth(); $d = Request::all(); $id = Database::insert('categories',['tenant_id'=>Auth::tenantId(),'name'=>$d['name'],'description'=>$d['description']??'']);
+        Response::success(Database::fetch('SELECT * FROM categories WHERE id=:i',['i'=>$id]), 'Created');
+    }
+    elseif (preg_match('#^/api/categories/(\d+)$#', $uri, $m) && $method === 'GET') {
+        auth(); $c = Database::fetch('SELECT * FROM categories WHERE id=:i AND tenant_id=:t',['i'=>$m[1],'t'=>Auth::tenantId()]);
+        $c ? Response::success($c) : Response::error('Not found', 404);
+    }
+    elseif (preg_match('#^/api/categories/(\d+)$#', $uri, $m) && $method === 'PUT') {
+        auth(); $d = Request::all();
+        Database::update('categories',['name'=>$d['name']],'id=:i',['i'=>$m[1]]);
+        Response::success(Database::fetch('SELECT * FROM categories WHERE id=:i',['i'=>$m[1]]), 'Updated');
+    }
+    elseif (preg_match('#^/api/categories/(\d+)$#', $uri, $m) && $method === 'DELETE') {
+        auth(); Database::delete('categories','id=:i',['i'=>$m[1]]);
+        Response::success(null, 'Deleted');
+    }
 
-$router->post('/api/auth/register', function () {
-    $data = Request::all();
-    $errors = Request::validate([
-        'tenant_name' => 'required|min:1|max:255', 'name' => 'required|min:1|max:255',
-        'email' => 'required|email', 'password' => 'required|min:6',
-    ]);
-    if (!empty($errors)) Response::error('Validation failed', 422, $errors);
+    // === PRODUCTS ===
+    elseif ($uri === '/api/products' && $method === 'GET') {
+        auth(); $sid = Auth::storeId(); if (!$sid) { Response::success([]); }
+        $q = Request::get('search',''); $cat = Request::get('category_id','');
+        $p = ['tenant_id'=>Auth::tenantId(), 'store_id'=>$sid];
+        $w = ['p.tenant_id=:tenant_id', 'ps.store_id=:store_id'];
+        if ($q) { $w[] = '(p.name ILIKE :q OR p.sku ILIKE :q OR p.barcode ILIKE :q)'; $p['q'] = "%$q%"; }
+        if ($cat) { $w[] = 'p.category_id=:cat'; $p['cat'] = $cat; }
+        Response::success(Database::fetchAll("SELECT p.id,p.tenant_id,p.category_id,p.name,p.sku,p.barcode,p.price,p.cost,ps.stock,ps.min_stock,p.description,p.image,p.is_active,p.created_at,p.updated_at,c.name as category_name FROM products p LEFT JOIN categories c ON c.id=p.category_id JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:store_id WHERE ".implode(' AND ',$w)." ORDER BY p.name", $p));
+    }
+    elseif ($uri === '/api/products' && $method === 'POST') {
+        auth(); $d = Request::all();
+        $id = Database::insert('products',['tenant_id'=>Auth::tenantId(),'category_id'=>!empty($d['category_id'])?(int)$d['category_id']:null,'name'=>$d['name'],'sku'=>$d['sku']??'','barcode'=>$d['barcode']??'','price'=>$d['price'],'cost'=>$d['cost']??0,'description'=>$d['description']??'','is_active'=>true]);
+        foreach (Database::fetchAll('SELECT id FROM stores WHERE tenant_id=:t AND is_active=true',['t'=>Auth::tenantId()]) as $s) {
+            Database::insert('product_stocks',['product_id'=>$id,'store_id'=>$s['id'],'stock'=>$d['stock']??0,'min_stock'=>$d['min_stock']??0]);
+        }
+        Response::success(Database::fetch('SELECT p.*,COALESCE(ps.stock,0) as stock,COALESCE(ps.min_stock,0) as min_stock FROM products p LEFT JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.id=:i',['i'=>$id,'s'=>Auth::storeId()??0]), 'Created');
+    }
+    elseif (preg_match('#^/api/products/(\d+)$#', $uri, $m) && $method === 'GET') {
+        auth(); $p = Database::fetch('SELECT p.*,c.name as category_name,COALESCE(ps.stock,0) as stock,COALESCE(ps.min_stock,0) as min_stock FROM products p LEFT JOIN categories c ON c.id=p.category_id LEFT JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.id=:i AND p.tenant_id=:t',['i'=>$m[1],'t'=>Auth::tenantId(),'s'=>Auth::storeId()??0]);
+        $p ? Response::success($p) : Response::error('Not found', 404);
+    }
+    elseif (preg_match('#^/api/products/(\d+)$#', $uri, $m) && $method === 'PUT') {
+        auth(); $d = Request::all(); $id = $m[1];
+        Database::update('products',['name'=>$d['name']??'','price'=>$d['price']??0,'cost'=>$d['cost']??0,'description'=>$d['description']??''],'id=:i',['i'=>$id]);
+        Response::success(Database::fetch('SELECT p.*,COALESCE(ps.stock,0) as stock,COALESCE(ps.min_stock,0) as min_stock FROM products p LEFT JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.id=:i',['i'=>$id,'s'=>Auth::storeId()??0]), 'Updated');
+    }
+    elseif (preg_match('#^/api/products/(\d+)$#', $uri, $m) && $method === 'DELETE') {
+        auth(); Database::delete('products','id=:i',['i'=>$m[1]]);
+        Response::success(null, 'Deleted');
+    }
 
-    $existingTenant = Database::fetch('SELECT id FROM tenants WHERE slug = :slug', ['slug' => strtolower(str_replace(' ', '-', $data['tenant_name']))]);
-    if ($existingTenant) Response::error('Business name already registered', 422);
-    $existingUser = Database::fetch('SELECT id FROM users WHERE email = :email', ['email' => $data['email']]);
-    if ($existingUser) Response::error('Email already registered', 422);
+    // === PRODUCTS SEARCH ===
+    elseif ($uri === '/api/products/search' && $method === 'GET') {
+        auth(); $q = Request::get('q',''); $sid = Auth::storeId();
+        if (!$q || !$sid) { Response::success([]); }
+        Response::success(Database::fetchAll("SELECT p.id,p.name,p.sku,p.price,p.image,ps.stock FROM products p JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.tenant_id=:t AND p.is_active=true AND ps.stock>0 AND (p.name ILIKE :q OR p.sku ILIKE :q OR p.barcode ILIKE :q) ORDER BY p.name LIMIT 20",['t'=>Auth::tenantId(),'s'=>$sid,'q'=>"%$q%"]));
+    }
 
-    $pdo = Database::getInstance()->getConnection(); $pdo->beginTransaction();
-    try {
-        $slug = strtolower(str_replace(' ', '-', $data['tenant_name'])) . '-' . uniqid();
-        $tenantId = Database::insert('tenants', ['name' => $data['tenant_name'], 'slug' => $slug, 'email' => $data['email']]);
-        $userId = Database::insert('users', ['tenant_id' => $tenantId, 'name' => $data['name'], 'email' => $data['email'], 'password' => password_hash($data['password'], PASSWORD_BCRYPT), 'role' => 'admin']);
-        $storeId = Database::insert('stores', ['tenant_id' => $tenantId, 'name' => $data['tenant_name'] . ' Main', 'code' => 'MAIN']);
-        Database::insert('user_stores', ['user_id' => $userId, 'store_id' => $storeId]);
-        $pdo->commit();
+    // === BARCODE LOOKUP ===
+    elseif ($uri === '/api/products/lookup' && $method === 'GET') {
+        auth(); $bc = Request::get('barcode','');
+        if (!$bc) Response::error('Barcode required');
+        $local = Database::fetch('SELECT p.*,c.name as category_name FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.tenant_id=:t AND p.barcode=:b LIMIT 1',['t'=>Auth::tenantId(),'b'=>$bc]);
+        if ($local) Response::success($local, 'Found locally');
+        if (!preg_match('/^\d{8,14}$/',$bc)) Response::success(null, 'Invalid format');
+        $ctx = stream_context_create(['http'=>['timeout'=>5,'user_agent'=>'MIKOPos/1.0']]);
+        $resp = @file_get_contents("https://world.openfoodfacts.org/api/v2/product/".urlencode($bc).".json", false, $ctx);
+        if ($resp === false) Response::success(null, 'Unavailable');
+        $d = json_decode($resp, true);
+        if (!$d||!($d['status']??0)) Response::success(null, 'Not found online');
+        $p = $d['product']??[];
+        Response::success(['barcode'=>$bc,'name'=>$p['product_name']??$p['generic_name']??'','brand'=>$p['brands']??'','category_name'=>$p['categories_hierarchy'][0]??'','image'=>$p['image_url']??'','source'=>'openfoodfacts'], 'Found online');
+    }
 
-        Auth::attempt($data['email'], $data['password']);
-        Session::set('store_id', $storeId); Session::set('store_name', $data['tenant_name'] . ' Main');
-        $token = \Miko\JWTAuth::encode(['user_id' => $userId, 'tenant_id' => $tenantId, 'role' => 'admin', 'tenant_name' => $data['tenant_name'], 'store_id' => $storeId, 'store_name' => $data['tenant_name'] . ' Main']);
-        Response::success(['token' => $token, 'user' => ['id' => $userId, 'name' => $data['name'], 'email' => $data['email'], 'role' => 'admin'], 'tenant' => ['name' => $data['tenant_name'], 'slug' => $slug], 'store' => ['id' => $storeId, 'name' => $data['tenant_name'] . ' Main']], 'Registration successful');
-    } catch (\Exception $e) { $pdo->rollBack(); Response::error('Registration failed: ' . $e->getMessage(), 500); }
-});
+    // === CUSTOMERS ===
+    elseif ($uri === '/api/customers' && $method === 'GET') {
+        auth(); $s = Request::get('search',''); $p = ['tenant_id'=>Auth::tenantId()]; $w = 'tenant_id=:tenant_id';
+        if ($s) { $w .= ' AND (name ILIKE :s OR phone ILIKE :s OR email ILIKE :s)'; $p['s'] = "%$s%"; }
+        Response::success(Database::fetchAll("SELECT c.*,(SELECT COUNT(*) FROM sales s WHERE s.customer_id=c.id) as sale_count,(SELECT COALESCE(SUM(s.total),0) FROM sales s WHERE s.customer_id=c.id) as total_spent FROM customers c WHERE $w ORDER BY c.name", $p));
+    }
+    elseif ($uri === '/api/customers' && $method === 'POST') {
+        auth(); $d = Request::all();
+        $id = Database::insert('customers',['tenant_id'=>Auth::tenantId(),'name'=>$d['name'],'phone'=>$d['phone']??'','email'=>$d['email']??'','address'=>$d['address']??'']);
+        Response::success(Database::fetch('SELECT * FROM customers WHERE id=:i',['i'=>$id]), 'Created');
+    }
+    elseif (preg_match('#^/api/customers/(\d+)$#', $uri, $m) && $method === 'GET') {
+        auth(); $c = Database::fetch('SELECT * FROM customers WHERE id=:i AND tenant_id=:t',['i'=>$m[1],'t'=>Auth::tenantId()]);
+        $c ? Response::success($c) : Response::error('Not found', 404);
+    }
+    elseif (preg_match('#^/api/customers/(\d+)$#', $uri, $m) && $method === 'PUT') {
+        auth(); $d = Request::all();
+        Database::update('customers',['name'=>$d['name']??'','phone'=>$d['phone']??'','email'=>$d['email']??'','address'=>$d['address']??''],'id=:i',['i'=>$m[1]]);
+        Response::success(Database::fetch('SELECT * FROM customers WHERE id=:i',['i'=>$m[1]]), 'Updated');
+    }
+    elseif (preg_match('#^/api/customers/(\d+)$#', $uri, $m) && $method === 'DELETE') {
+        auth(); Database::delete('customers','id=:i',['i'=>$m[1]]);
+        Response::success(null, 'Deleted');
+    }
 
-$router->get('/api/auth/me', function () {
-    Auth::requireAuth();
-    $user = Auth::user();
-    $stores = Database::fetchAll('SELECT s.* FROM stores s JOIN user_stores us ON us.store_id = s.id WHERE us.user_id = :user_id AND s.is_active = true', ['user_id' => Auth::id()]);
-    Response::success(['user' => $user, 'tenant' => ['name' => Auth::tenantName()], 'stores' => $stores, 'store' => Auth::hasStore() ? ['id' => Auth::storeId(), 'name' => Auth::storeName()] : null]);
-});
+    // === SALES ===
+    elseif ($uri === '/api/sales' && $method === 'GET') {
+        auth(); $sid = Auth::storeId(); $p = ['tenant_id'=>Auth::tenantId()]; $w = ['s.tenant_id=:tenant_id'];
+        if ($sid) { $w[] = 's.store_id=:store_id'; $p['store_id'] = $sid; }
+        $search = Request::get('search',''); $from = Request::get('from',''); $to = Request::get('to','');
+        if ($search) { $w[] = '(s.invoice_no ILIKE :s OR c.name ILIKE :s)'; $p['s'] = "%$search%"; }
+        if ($from) { $w[] = 's.created_at>=:from'; $p['from'] = $from; }
+        if ($to) { $w[] = "s.created_at<=:to"; $p['to'] = "$to 23:59:59"; }
+        Response::success(Database::fetchAll("SELECT s.*,u.name as cashier_name,c.name as customer_name FROM sales s LEFT JOIN users u ON u.id=s.user_id LEFT JOIN customers c ON c.id=s.customer_id WHERE ".implode(' AND ',$w)." ORDER BY s.created_at DESC", $p));
+    }
+    elseif ($uri === '/api/sales' && $method === 'POST') {
+        auth(); $d = Request::all(); $items = $d['items'] ?? [];
+        if (!is_array($items) || !$items) Response::error('Cart is empty');
+        $tid = Auth::tenantId(); $uid = Auth::id(); $sid = Auth::storeId();
+        if (!$sid) Response::error('No store selected', 400);
+        $pdo = Database::getInstance()->getConnection(); $pdo->beginTransaction();
+        try {
+            $subtotal = 0; $saleItems = [];
+            foreach ($items as $item) {
+                $prod = Database::fetch('SELECT p.id,p.name,p.price,ps.stock FROM products p JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.id=:i AND p.tenant_id=:t',['i'=>(int)$item['product_id'],'t'=>$tid,'s'=>$sid]);
+                if (!$prod) throw new \Exception("Product {$item['product_id']} not found");
+                $qty = max(1, (int)($item['quantity']??1));
+                if ($prod['stock'] < $qty) throw new \Exception("Insufficient stock for {$prod['name']}");
+                $price = (float)($item['price']??$prod['price']); $st = $price*$qty; $subtotal += $st;
+                $saleItems[] = ['product_id'=>$prod['id'],'product_name'=>$prod['name'],'quantity'=>$qty,'price'=>$price,'subtotal'=>$st];
+                Database::query('UPDATE product_stocks SET stock=stock-:q WHERE product_id=:i AND store_id=:s',['q'=>$qty,'i'=>$prod['id'],'s'=>$sid]);
+            }
+            $disc = (float)($d['discount']??0); $tax = (float)($d['tax']??0);
+            $total = $subtotal-$disc+$tax; $paid = (float)($d['amount_paid']??0); $change = max(0,$paid-$total);
+            $inv = 'INV-'.date('Ymd').'-'.strtoupper(substr(uniqid(),-6));
+            $saleId = Database::insert('sales',['tenant_id'=>$tid,'store_id'=>$sid,'user_id'=>$uid,'customer_id'=>!empty($d['customer_id'])?(int)$d['customer_id']:null,'invoice_no'=>$inv,'subtotal'=>$subtotal,'tax'=>$tax,'discount'=>$disc,'total'=>$total,'payment_method'=>$d['payment_method']??'cash','amount_paid'=>$paid,'change_amount'=>$change,'status'=>'completed','notes'=>$d['notes']??'']);
+            foreach ($saleItems as $si) { $si['sale_id'] = $saleId; Database::insert('sale_items', $si); }
+            $pdo->commit();
+            $sale = Database::fetch('SELECT s.*,u.name as cashier_name,c.name as customer_name FROM sales s LEFT JOIN users u ON u.id=s.user_id LEFT JOIN customers c ON c.id=s.customer_id WHERE s.id=:i',['i'=>$saleId]);
+            $sale['items'] = $saleItems; Response::success($sale, 'Sale completed');
+        } catch (\Exception $e) { $pdo->rollBack(); Response::error($e->getMessage(), 422); }
+    }
+    elseif (preg_match('#^/api/sales/(\d+)$#', $uri, $m) && $method === 'GET') {
+        auth();
+        $s = Database::fetch('SELECT s.*,u.name as cashier_name,c.name as customer_name,c.phone as customer_phone FROM sales s LEFT JOIN users u ON u.id=s.user_id LEFT JOIN customers c ON c.id=s.customer_id WHERE s.id=:i AND s.tenant_id=:t',['i'=>$m[1],'t'=>Auth::tenantId()]);
+        if (!$s) Response::error('Not found', 404);
+        $s['items'] = Database::fetchAll('SELECT si.*,p.sku FROM sale_items si LEFT JOIN products p ON p.id=si.product_id WHERE si.sale_id=:s',['s'=>$m[1]]);
+        Response::success($s);
+    }
+    elseif (preg_match('#^/api/sales/(\d+)$#', $uri, $m) && $method === 'DELETE') {
+        auth(); $sid = $m[1]; $s = Database::fetch('SELECT * FROM sales WHERE id=:i AND tenant_id=:t',['i'=>$sid,'t'=>Auth::tenantId()]);
+        if (!$s) Response::error('Not found', 404);
+        $pdo = Database::getInstance()->getConnection(); $pdo->beginTransaction();
+        try {
+            foreach (Database::fetchAll('SELECT product_id,quantity FROM sale_items WHERE sale_id=:s',['s'=>$sid]) as $item) {
+                if ($item['product_id']) Database::query('UPDATE product_stocks SET stock=stock+:q WHERE product_id=:i AND store_id=:s',['q'=>$item['quantity'],'i'=>$item['product_id'],'s'=>$s['store_id']]);
+            }
+            Database::update('sales',['status'=>'voided'],'id=:i',['i'=>$sid]);
+            $pdo->commit(); Response::success(null, 'Voided');
+        } catch (\Exception $e) { $pdo->rollBack(); Response::error($e->getMessage(), 422); }
+    }
 
-// Dashboard
-$router->get('/api/dashboard/stats', function () {
-    Auth::requireAuth();
-    $tenantId = Auth::tenantId();
-    $today = date('Y-m-d'); $currentMonth = date('Y-m');
-    $todaySales = Database::fetch("SELECT COUNT(*) as count, COALESCE(SUM(total), 0) as total FROM sales WHERE tenant_id = :tenant_id AND created_at::date = :today AND status = 'completed'", ['tenant_id' => $tenantId, 'today' => $today]);
-    $monthSales = Database::fetch("SELECT COUNT(*) as count, COALESCE(SUM(total), 0) as total FROM sales WHERE tenant_id = :tenant_id AND to_char(created_at, 'YYYY-MM') = :month AND status = 'completed'", ['tenant_id' => $tenantId, 'month' => $currentMonth]);
-    $productCount = Database::fetch('SELECT COUNT(*) as count FROM products WHERE tenant_id = :tenant_id', ['tenant_id' => $tenantId]);
-    $customerCount = Database::fetch('SELECT COUNT(*) as count FROM customers WHERE tenant_id = :tenant_id', ['tenant_id' => $tenantId]);
-    $storeId = Auth::storeId();
-    if ($storeId) {
-        $lowStock = Database::fetchAll('SELECT p.id, p.name, p.sku, ps.stock, ps.min_stock FROM products p JOIN product_stocks ps ON ps.product_id = p.id AND ps.store_id = :store_id WHERE p.tenant_id = :tenant_id AND p.is_active = true AND ps.stock <= ps.min_stock ORDER BY ps.stock ASC LIMIT 5', ['tenant_id' => $tenantId, 'store_id' => $storeId]);
-        $recentSales = Database::fetchAll('SELECT s.id, s.invoice_no, s.total, s.created_at, c.name as customer_name FROM sales s LEFT JOIN customers c ON c.id = s.customer_id WHERE s.tenant_id = :tenant_id AND s.store_id = :store_id ORDER BY s.created_at DESC LIMIT 5', ['tenant_id' => $tenantId, 'store_id' => $storeId]);
-    } else { $lowStock = []; $recentSales = []; }
-    Response::success(['today_sales' => $todaySales, 'month_sales' => $monthSales, 'product_count' => $productCount['count'] ?? 0, 'customer_count' => $customerCount['count'] ?? 0, 'low_stock' => $lowStock, 'recent_sales' => $recentSales]);
-});
+    // === STORES ===
+    elseif ($uri === '/api/stores' && $method === 'GET') {
+        auth(); Response::success(Database::fetchAll('SELECT * FROM stores WHERE tenant_id=:t AND is_active=true ORDER BY name',['t'=>Auth::tenantId()]));
+    }
+    elseif ($uri === '/api/stores/mine' && $method === 'GET') {
+        auth(); Response::success(Database::fetchAll('SELECT s.* FROM stores s JOIN user_stores us ON us.store_id=s.id WHERE us.user_id=:u AND s.is_active=true',['u'=>Auth::id()]));
+    }
+    elseif ($uri === '/api/stores' && $method === 'POST') {
+        auth(); $d = Request::all(); $id = Database::insert('stores',['tenant_id'=>Auth::tenantId(),'name'=>$d['name'],'code'=>$d['code']??'','address'=>$d['address']??'','phone'=>$d['phone']??'']);
+        Response::success(Database::fetch('SELECT * FROM stores WHERE id=:i',['i'=>$id]), 'Created');
+    }
+    elseif ($uri === '/api/stores/switch' && $method === 'POST') {
+        auth(); $sid = (int)Request::input('store_id');
+        $s = Database::fetch('SELECT s.* FROM stores s JOIN user_stores us ON us.store_id=s.id WHERE us.user_id=:u AND s.id=:i',['u'=>Auth::id(),'i'=>$sid]);
+        if (!$s) Response::error('Store not found or no access', 404);
+        Session::set('store_id',$sid); Session::set('store_name',$s['name']);
+        Response::success(['store'=>$s], 'Store switched');
+    }
+    elseif ($uri === '/api/stores/current' && $method === 'GET') {
+        auth(); $sid = Auth::storeId();
+        if (!$sid) Response::success(null, 'No store selected');
+        Response::success(Database::fetch('SELECT * FROM stores WHERE id=:i',['i'=>$sid]));
+    }
+    elseif (preg_match('#^/api/stores/(\d+)$#', $uri, $m) && $method === 'PUT') {
+        auth(); $d = Request::all();
+        Database::update('stores',['name'=>$d['name']??'','code'=>$d['code']??'','address'=>$d['address']??'','phone'=>$d['phone']??''],'id=:i',['i'=>$m[1]]);
+        Response::success(Database::fetch('SELECT * FROM stores WHERE id=:i',['i'=>$m[1]]), 'Updated');
+    }
 
-// Products search
-$router->get('/api/products/search', function () {
-    Auth::requireAuth();
-    $q = Request::get('q', ''); $storeId = Auth::storeId();
-    if (!$q || !$storeId) { Response::success([]); }
-    $products = Database::fetchAll("SELECT p.id, p.name, p.sku, p.price, p.image, ps.stock FROM products p JOIN product_stocks ps ON ps.product_id = p.id AND ps.store_id = :store_id WHERE p.tenant_id = :tenant_id AND p.is_active = true AND ps.stock > 0 AND (p.name ILIKE :q OR p.sku ILIKE :q OR p.barcode ILIKE :q) ORDER BY p.name LIMIT 20", ['tenant_id' => Auth::tenantId(), 'store_id' => $storeId, 'q' => "%{$q}%"]);
-    Response::success($products);
-});
+    // === RECEIPT ===
+    elseif (preg_match('#^/api/sales/(\d+)/receipt$#', $uri, $m) && $method === 'GET') {
+        auth(); $id = $m[1];
+        $s = Database::fetch('SELECT s.*,u.name as cashier_name,c.name as customer_name,c.phone as customer_phone,t.name as tenant_name,t.address as tenant_address,t.phone as tenant_phone FROM sales s LEFT JOIN users u ON u.id=s.user_id LEFT JOIN customers c ON c.id=s.customer_id JOIN tenants t ON t.id=s.tenant_id WHERE s.id=:i AND s.tenant_id=:t',['i'=>$id,'t'=>Auth::tenantId()]);
+        if (!$s) Response::error('Not found', 404);
+        $s['items'] = Database::fetchAll('SELECT * FROM sale_items WHERE sale_id=:s',['s'=>$id]);
+        Response::success($s);
+    }
 
-// Barcode lookup
-$router->get('/api/products/lookup', function () {
-    Auth::requireAuth();
-    $barcode = Request::get('barcode', '');
-    if (!$barcode) { Response::error('Barcode is required'); }
-    $local = Database::fetch('SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON c.id = p.category_id WHERE p.tenant_id = :tenant_id AND p.barcode = :barcode LIMIT 1', ['tenant_id' => Auth::tenantId(), 'barcode' => $barcode]);
-    if ($local) { Response::success($local, 'Found locally'); }
-    if (!preg_match('/^\d{8,14}$/', $barcode)) { Response::success(null, 'Invalid barcode format for online lookup'); }
-    $url = 'https://world.openfoodfacts.org/api/v2/product/' . urlencode($barcode) . '.json';
-    $ctx = stream_context_create(['http' => ['timeout' => 5, 'user_agent' => 'MIKOPos/1.0']]);
-    $response = @file_get_contents($url, false, $ctx);
-    if ($response === false) { Response::success(null, 'Online lookup unavailable'); }
-    $data = json_decode($response, true);
-    if (!$data || !($data['status'] ?? 0)) { Response::success(null, 'Product not found online'); }
-    $product = $data['product'] ?? [];
-    Response::success(['barcode' => $barcode, 'name' => $product['product_name'] ?? $product['generic_name'] ?? '', 'brand' => $product['brands'] ?? '', 'category_name' => $product['categories_hierarchy'][0] ?? '', 'image' => $product['image_url'] ?? '', 'source' => 'openfoodfacts'], 'Found via Open Food Facts');
-});
+    // 404
+    else {
+        http_response_code(404);
+        echo json_encode(['success'=>false, 'message'=>'Route not found', 'uri'=>$uri, 'method'=>$method]);
+    }
 
-// Sale receipt
-$router->get('/api/sales/(\d+)/receipt', function (int $id) {
-    Auth::requireAuth();
-    $sale = Database::fetch('SELECT s.*, u.name as cashier_name, c.name as customer_name, c.phone as customer_phone, t.name as tenant_name, t.address as tenant_address, t.phone as tenant_phone FROM sales s LEFT JOIN users u ON u.id = s.user_id LEFT JOIN customers c ON c.id = s.customer_id JOIN tenants t ON t.id = s.tenant_id WHERE s.id = :id AND s.tenant_id = :tenant_id', ['id' => $id, 'tenant_id' => Auth::tenantId()]);
-    if (!$sale) { Response::error('Sale not found', 404); }
-    $sale['items'] = Database::fetchAll('SELECT * FROM sale_items WHERE sale_id = :sale_id', ['sale_id' => $id]);
-    Response::success($sale);
-});
-
-// Store routes
-$router->get('/api/stores', function () { (new \Miko\Controllers\StoreController())->all(); });
-$router->get('/api/stores/mine', function () { (new \Miko\Controllers\StoreController())->index(); });
-$router->post('/api/stores', function () { (new \Miko\Controllers\StoreController())->store(); });
-$router->put('/api/stores/(\d+)', function (int $id) { (new \Miko\Controllers\StoreController())->update($id); });
-$router->post('/api/stores/switch', function () { (new \Miko\Controllers\StoreController())->switch(); });
-$router->get('/api/stores/current', function () { (new \Miko\Controllers\StoreController())->current(); });
-
-Router::apiResource('/api/categories', 'Miko\\Controllers\\CategoryController');
-Router::apiResource('/api/products', 'Miko\\Controllers\\ProductController');
-Router::apiResource('/api/customers', 'Miko\\Controllers\\CustomerController');
-Router::apiResource('/api/sales', 'Miko\\Controllers\\SaleController');
-
-$router->set404(function () {
-    http_response_code(404);
-    header('Content-Type: application/json');
-    echo json_encode(['success' => false, 'message' => 'Route not found']);
-});
-
-$router->run();
+} catch (\Exception $e) {
+    http_response_code(500);
+    echo json_encode(['success'=>false, 'message'=>$e->getMessage()]);
+}
