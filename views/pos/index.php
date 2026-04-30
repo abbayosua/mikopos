@@ -272,6 +272,16 @@ function pos() {
         receipt: {},
 
         async init() {
+            // 1. Show cached data instantly if available
+            const cached = cache.get('posInit');
+            if (cached) {
+                this.products = cached.products || [];
+                this.categories = cached.categories || [];
+                this.customers = cached.customers || [];
+                this.pageLoading = false;
+            }
+
+            // 2. Fetch fresh data in background (revalidate)
             const [meRes, initRes] = await Promise.all([
                 apiFetch('/api/auth/me'),
                 apiFetch('/api/pos/init'),
@@ -290,7 +300,14 @@ function pos() {
                 this.customers = d.customers || [];
                 cache.set('categories', this.categories, 30 * 60 * 1000);
                 cache.set('customers', this.customers, 10 * 60 * 1000);
+                cache.set('posInit', {
+                    products: d.products,
+                    categories: d.categories,
+                    customers: d.customers,
+                    token_check: d.token_check,
+                }, 5 * 60 * 1000);
             }
+
             this.pageLoading = false;
         },
 

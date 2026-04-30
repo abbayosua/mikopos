@@ -77,9 +77,11 @@ function categories() {
         pageLoading: true,
         error: '',
         async load() {
-            this.pageLoading = true;
+            // 1. Show cached data instantly
             const cached = cache.get('categories');
-            if (cached) { this.items = cached; this.pageLoading = false; return; }
+            if (cached) { this.items = cached; this.pageLoading = false; }
+
+            // 2. Fetch fresh
             const res = await apiFetch('/api/categories');
             const data = await res.json();
             if (data.success) { this.items = data.data; cache.set('categories', data.data, 30 * 60 * 1000); }

@@ -97,13 +97,16 @@ function customers() {
         pageLoading: true,
         error: '',
         async load() {
-            this.pageLoading = true;
             const params = new URLSearchParams();
             if (this.search) params.set('search', this.search);
+
+            // 1. Show cached data instantly
             if (!this.search) {
                 const cached = cache.get('customers');
-                if (cached) { this.items = cached; this.pageLoading = false; return; }
+                if (cached) { this.items = cached; this.pageLoading = false; }
             }
+
+            // 2. Fetch fresh
             const res = await apiFetch('/api/customers?' + params);
             const data = await res.json();
             if (data.success) { this.items = data.data; if (!this.search) cache.set('customers', data.data, 10 * 60 * 1000); }

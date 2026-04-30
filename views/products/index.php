@@ -67,13 +67,16 @@ function products() {
         search: '',
         loading: true,
         async load() {
-            this.loading = true;
             const params = new URLSearchParams();
             if (this.search) params.set('search', this.search);
+
+            // 1. Show cached data instantly
             if (!this.search) {
                 const cached = cache.get('products');
-                if (cached) { this.products = cached; this.loading = false; return; }
+                if (cached) { this.products = cached; this.loading = false; }
             }
+
+            // 2. Fetch fresh in background
             const res = await apiFetch('/api/products?' + params);
             const data = await res.json();
             if (data.success) {

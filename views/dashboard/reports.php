@@ -110,23 +110,28 @@ function reports() {
         loading: true,
         async load() {
             this.loading = true;
-            let stats = cache.get('reportStats');
-            if (!stats) {
-                const res = await apiFetch('/api/dashboard/stats');
-                const data = await res.json();
-                if (data.success) {
-                    stats = data.data;
-                    cache.set('reportStats', stats, 2 * 60 * 1000);
-                }
+
+            // 1. Show cached data instantly
+            const cached = cache.get('reportStats');
+            if (cached) {
+                this.summary = cached.today_sales || { count: 0, total: 0 };
+                this.lowStock = cached.low_stock || [];
+                this.recentSales = cached.recent_sales || [];
+                this.loading = false;
             }
-            if (stats) {
-                this.summary = stats.today_sales || { count: 0, total: 0 };
-                this.lowStock = stats.low_stock || [];
-                this.recentSales = stats.recent_sales || [];
+
+            // 2. Fetch fresh in background
+            const res = await apiFetch('/api/dashboard/stats');
+            const data = await res.json();
+            if (data.success) {
+                const s = data.data;
+                this.summary = s.today_sales || { count: 0, total: 0 };
+                this.lowStock = s.low_stock || [];
+                this.recentSales = s.recent_sales || [];
+                cache.set('reportStats', s, 2 * 60 * 1000);
             }
 
             let topProductsData = cache.get('topProducts');
-            if (!topProductsData) {
                 const res2 = await apiFetch('/api/sales?limit=50');
                 const data2 = await res2.json();
                 if (data2.success) {
