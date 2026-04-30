@@ -23,7 +23,7 @@ if (str_starts_with($uri, '/api/')) {
 $router = Router::init();
 
 $router->before('GET|POST|PUT|DELETE', '/.*', function () {
-    $publicPaths = ['/login', '/register', '/api/auth/login', '/api/auth/register'];
+    $publicPaths = ['/login', '/register', '/app', '/api/auth/login', '/api/auth/register'];
     $currentUri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
     $storeHeader = $_SERVER['HTTP_X_STORE_ID'] ?? $_SERVER['X-Store-Id'] ?? '';
@@ -107,6 +107,10 @@ $router->get('/reports', function () {
 $router->get('/logout', function () {
     Auth::logout();
     Response::redirect('/login');
+});
+
+$router->get('/app', function () {
+    require __DIR__ . '/views/spa.php';
 });
 
 // API: Auth
