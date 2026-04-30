@@ -41,6 +41,10 @@ $router->before('GET|POST|PUT|DELETE', '/.*', function () {
 });
 
 // Auth routes
+$router->get('/api/debug', function () {
+    Response::success(['routes_loaded' => true, 'uri' => $_SERVER['REQUEST_URI']]);
+});
+
 $router->post('/api/auth/login', function () {
     $data = Request::all();
     $email = $data['email'] ?? '';
