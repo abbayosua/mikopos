@@ -42,8 +42,9 @@ const sync = {
         const unsynced = all.filter(s => !s.synced);
         if (!unsynced.length) return;
 
-        let syncedAny = false;
         for (const sale of unsynced) {
+            try {
+                const res = await apiPost('/api/sync/sales', {
                     items: sale.items, customer_id: sale.customer_id,
                     discount: sale.discount, tax: sale.tax,
                     payment_method: sale.payment_method, amount_paid: sale.amount_paid,
