@@ -3,6 +3,13 @@
         <h2 class="text-2xl font-bold text-gray-800">Sales History</h2>
     </div>
 
+    <template x-if="loading">
+        <div class="flex justify-center py-20">
+            <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i>
+        </div>
+    </template>
+
+    <template x-if="!loading">
     <div class="bg-white rounded-lg shadow">
         <div class="p-4 border-b flex gap-2">
             <input type="text" x-model="search" @input.debounce="load" placeholder="Search by invoice or customer..." class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -46,6 +53,7 @@
             <p class="p-6 text-center text-gray-500">No sales found</p>
         </template>
     </div>
+    </template>
 </div>
 
 <script>
@@ -55,7 +63,9 @@ function sales() {
         search: '',
         from: '',
         to: '',
+        loading: true,
         async load() {
+            this.loading = true;
             const params = new URLSearchParams();
             if (this.search) params.set('search', this.search);
             if (this.from) params.set('from', this.from);
@@ -63,6 +73,7 @@ function sales() {
             const res = await apiFetch('/api/sales?' + params);
             const data = await res.json();
             if (data.success) this.items = data.data;
+            this.loading = false;
         },
         formatMoney(n) { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(n || 0); }
     }

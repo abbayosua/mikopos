@@ -1,5 +1,13 @@
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <div x-data="pos()" x-init="init()" class="h-full">
+    <!-- Loading -->
+    <template x-if="pageLoading && !currentStore">
+        <div class="flex items-center justify-center h-[calc(100vh-8rem)]">
+            <i class="fas fa-spinner fa-pulse text-5xl text-indigo-800"></i>
+        </div>
+    </template>
+
+    <template x-if="!pageLoading || currentStore">
     <!-- Store Required -->
     <template x-if="!currentStore">
         <div class="flex items-center justify-center h-[calc(100vh-8rem)]">
@@ -236,11 +244,13 @@
             </div>
         </div>
     </div>
+    </template>
 </div>
 
 <script>
 function pos() {
     return {
+        pageLoading: true,
         products: [],
         categories: [],
         customers: [],
@@ -287,6 +297,7 @@ function pos() {
                 cache.set('categories', this.categories, 30 * 60 * 1000);
                 cache.set('customers', this.customers, 10 * 60 * 1000);
             }
+            this.pageLoading = false;
         },
 
         async selectStore(storeId) {

@@ -6,6 +6,13 @@
         </button>
     </div>
 
+    <template x-if="pageLoading">
+        <div class="flex justify-center py-20">
+            <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i>
+        </div>
+    </template>
+
+    <template x-if="!pageLoading">
     <div class="bg-white rounded-lg shadow">
         <div class="p-4 border-b">
             <input type="text" x-model="search" @input.debounce="load" placeholder="Search customers..." class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -77,6 +84,9 @@
     </div>
 </div>
 
+    </div>
+    </template>
+
 <script>
 function customers() {
     return {
@@ -86,17 +96,20 @@ function customers() {
         editing: false,
         form: { name: '', phone: '', email: '', address: '' },
         loading: false,
+        pageLoading: true,
         error: '',
         async load() {
+            this.pageLoading = true;
             const params = new URLSearchParams();
             if (this.search) params.set('search', this.search);
             if (!this.search) {
                 const cached = cache.get('customers');
-                if (cached) { this.items = cached; return; }
+                if (cached) { this.items = cached; this.pageLoading = false; return; }
             }
             const res = await apiFetch('/api/customers?' + params);
             const data = await res.json();
             if (data.success) { this.items = data.data; if (!this.search) cache.set('customers', data.data, 10 * 60 * 1000); }
+            this.pageLoading = false;
         },
         edit(c) {
             this.editing = true;

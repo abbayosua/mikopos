@@ -6,6 +6,13 @@
         </a>
     </div>
 
+    <template x-if="loading">
+        <div class="flex justify-center py-20">
+            <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i>
+        </div>
+    </template>
+
+    <template x-if="!loading">
     <div class="bg-white rounded-lg shadow">
         <div class="p-4 border-b">
             <input type="text" x-model="search" @input.debounce="load" placeholder="Search products..." class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -52,6 +59,7 @@
             </template>
         </div>
     </div>
+    </template>
 </div>
 
 <script>
@@ -59,12 +67,14 @@ function products() {
     return {
         products: [],
         search: '',
+        loading: true,
         async load() {
+            this.loading = true;
             const params = new URLSearchParams();
             if (this.search) params.set('search', this.search);
             if (!this.search) {
                 const cached = cache.get('products');
-                if (cached) { this.products = cached; return; }
+                if (cached) { this.products = cached; this.loading = false; return; }
             }
             const res = await apiFetch('/api/products?' + params);
             const data = await res.json();
@@ -72,6 +82,7 @@ function products() {
                 this.products = data.data;
                 if (!this.search) cache.set('products', data.data, 5 * 60 * 1000);
             }
+            this.loading = false;
         },
         async remove(id) {
             if (!confirm('Delete this product?')) return;

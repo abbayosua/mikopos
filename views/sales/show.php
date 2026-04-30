@@ -3,6 +3,13 @@
         <a href="/sales" class="text-indigo-600 hover:underline text-sm"><i class="fas fa-arrow-left mr-1"></i> Back to Sales</a>
     </div>
 
+    <template x-if="loading">
+        <div class="flex justify-center py-20">
+            <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i>
+        </div>
+    </template>
+
+    <template x-if="!loading">
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div class="lg:col-span-2">
             <div class="bg-white rounded-lg shadow p-6">
@@ -115,16 +122,20 @@
             </div>
         </div>
     </div>
+    </template>
 </div>
 
 <script>
 function saleDetail() {
     return {
         sale: null,
+        loading: true,
         async load(id) {
+            this.loading = true;
             const res = await apiFetch('/api/sales/' + id);
             const data = await res.json();
             if (data.success) this.sale = data.data;
+            this.loading = false;
         },
         async voidSale(id) {
             if (!confirm('Void this sale? This will restore stock.')) return;

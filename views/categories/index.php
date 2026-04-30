@@ -6,6 +6,13 @@
         </button>
     </div>
 
+    <template x-if="pageLoading">
+        <div class="flex justify-center py-20">
+            <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i>
+        </div>
+    </template>
+
+    <template x-if="!pageLoading">
     <div class="bg-white rounded-lg shadow overflow-x-auto">
         <table class="w-full text-sm">
             <thead>
@@ -58,6 +65,7 @@
             </form>
         </div>
     </div>
+    </template>
 </div>
 
 <script>
@@ -68,13 +76,16 @@ function categories() {
         editing: false,
         form: { name: '', description: '' },
         loading: false,
+        pageLoading: true,
         error: '',
         async load() {
+            this.pageLoading = true;
             const cached = cache.get('categories');
-            if (cached) { this.items = cached; return; }
+            if (cached) { this.items = cached; this.pageLoading = false; return; }
             const res = await apiFetch('/api/categories');
             const data = await res.json();
             if (data.success) { this.items = data.data; cache.set('categories', data.data, 30 * 60 * 1000); }
+            this.pageLoading = false;
         },
         edit(cat) {
             this.editing = true;

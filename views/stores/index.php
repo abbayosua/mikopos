@@ -6,6 +6,13 @@
         </button>
     </div>
 
+    <template x-if="pageLoading">
+        <div class="flex justify-center py-20">
+            <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i>
+        </div>
+    </template>
+
+    <template x-if="!pageLoading">
     <div class="bg-white rounded-lg shadow overflow-x-auto">
         <table class="w-full text-sm">
             <thead>
@@ -74,6 +81,7 @@
             </form>
         </div>
     </div>
+    </template>
 </div>
 
 <script>
@@ -85,8 +93,10 @@ function stores() {
         editing: false,
         form: { name: '', code: '', address: '', phone: '' },
         loading: false,
+        pageLoading: true,
         error: '',
         async load() {
+            this.pageLoading = true;
             const [allRes, curRes] = await Promise.all([
                 apiFetch('/api/stores'),
                 apiFetch('/api/auth/me')
@@ -95,6 +105,7 @@ function stores() {
             const cur = await curRes.json();
             if (all.success) this.items = all.data;
             if (cur.success) this.currentStore = cur.data.store;
+            this.pageLoading = false;
         },
         edit(s) {
             this.editing = true;

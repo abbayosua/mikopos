@@ -4,6 +4,13 @@
         <p class="text-gray-600">Welcome back, <?= htmlspecialchars(\Miko\Auth::user()['name'] ?? '') ?></p>
     </div>
 
+    <template x-if="loading">
+        <div class="flex justify-center py-20">
+            <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i>
+        </div>
+    </template>
+
+    <template x-if="!loading">
     <!-- Stats Cards -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div class="bg-white rounded-lg shadow p-4">
@@ -127,16 +134,20 @@
             </template>
         </div>
     </div>
+    </template>
 </div>
 
 <script>
 function dashboard() {
     return {
         stats: {},
+        loading: true,
         async load() {
+            this.loading = true;
             const res = await apiFetch('/api/dashboard/stats');
             const data = await res.json();
             if (data.success) this.stats = data.data;
+            this.loading = false;
         },
         formatMoney(n) {
             return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(n || 0);

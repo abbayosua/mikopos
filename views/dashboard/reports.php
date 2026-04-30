@@ -3,6 +3,13 @@
         <h2 class="text-2xl font-bold text-gray-800">Reports</h2>
     </div>
 
+    <template x-if="loading">
+        <div class="flex justify-center py-20">
+            <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i>
+        </div>
+    </template>
+
+    <template x-if="!loading">
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Sales Summary -->
         <div class="bg-white rounded-lg shadow p-6">
@@ -91,6 +98,7 @@
             </template>
         </div>
     </div>
+    </template>
 </div>
 
 <script>
@@ -101,7 +109,9 @@ function reports() {
         topProducts: [],
         lowStock: [],
         recentSales: [],
+        loading: true,
         async load() {
+            this.loading = true;
             let stats = cache.get('reportStats');
             if (!stats) {
                 const res = await apiFetch('/api/dashboard/stats');
@@ -141,6 +151,7 @@ function reports() {
                 }
             }
             this.topProducts = topProductsData || [];
+            this.loading = false;
         },
         formatMoney(n) { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(n || 0); }
     }
