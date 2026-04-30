@@ -370,10 +370,15 @@ const ProductForm = {
         },
     },
     async created() {
-        const catRes = await apiJson('/api/categories');
-        if (catRes.success) this.categories = catRes.data;
+        try { this.categories = await db.getAll('categories'); } catch(e) {}
+        if (!this.categories.length) { const catRes = await apiJson('/api/categories'); if (catRes.success) this.categories = catRes.data; }
         if (this.$route.params.id) {
             this.editing = true;
+            try {
+                const all = await db.getAll('products');
+                const found = all.find(p => String(p.id) === this.$route.params.id);
+                if (found) { this.form = found; return; }
+            } catch(e) {}
             const res = await apiJson('/api/products/' + this.$route.params.id);
             if (res.success) this.form = res.data;
         }
@@ -462,7 +467,6 @@ const Sales = {
         },
         async load() {
             this.loading = true;
-            // Show local sales first
             try {
                 const queue = await db.getAll('sales_queue');
                 this.items = queue.slice(-50).reverse().map(s => ({
@@ -475,10 +479,6 @@ const Sales = {
                     offline: true,
                 }));
             } catch(e) {}
-            // Background: fetch server sales
-            const p = new URLSearchParams(); if (this.search) p.set('search', this.search);
-            const res = await apiJson('/api/sales?' + p);
-            if (res.success) this.items = res.data;
             this.loading = false;
         },
     },
@@ -511,7 +511,18 @@ const SaleDetail = {
     </div>`,
     data: () => ({ sale: null, loading: true }),
     methods: { fmt: fmtMoney },
-    async created() { const res = await apiJson('/api/sales/' + this.$route.params.id); if (res.success) this.sale = res.data; this.loading = false; },
+    async created() {
+        // Read from local sales_queue first
+        try {
+            const all = await db.getAll('sales_queue');
+            const found = all.find(s => String(s.id) === this.$route.params.id || s.invoice_no === this.$route.params.id);
+            if (found) { this.sale = found; this.loading = false; return; }
+        } catch(e) {}
+        // Fallback to API
+        const res = await apiJson('/api/sales/' + this.$route.params.id);
+        if (res.success) this.sale = res.data;
+        this.loading = false;
+    },
 };
 
 // ── Reports ──
@@ -546,8 +557,8 @@ const Stores = {
     data: () => ({ items: [], pageLoading: true }),
     methods: {
         async load() {
-            const res = await apiJson('/api/stores');
-            if (res.success) this.items = res.data; this.pageLoading = false;
+            try { this.items = await db.getAll('stores'); } catch(e) {}
+            this.pageLoading = false;
         },
         async switchTo(s) {
             await apiPost('/api/stores/switch', { store_id: s.id });
