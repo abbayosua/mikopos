@@ -212,10 +212,14 @@ try {
         try {
             $subtotal = 0; $saleItems = [];
             foreach ($items as $item) {
-                $prod = Database::fetch('SELECT p.id,p.name,p.price,ps.stock FROM products p JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.id=:i AND p.tenant_id=:t',['i'=>(int)$item['product_id'],'t'=>$tid,'s'=>$sid]);
-                if (!$prod) throw new \Exception("Product {$item['product_id']} not found");
+                $sql = 'SELECT p.id,p.name,p.price,ps.stock FROM products p JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.id=:i AND p.tenant_id=:t';
+                $params = ['i'=>(int)$item['product_id'],'t'=>$tid,'s'=>$sid];
+                $stmt = Database::getInstance()->getConnection()->prepare($sql);
+                $stmt->execute($params);
+                $prod = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+                if (!$prod) throw new \Exception("Product {$item['product_id']} not found (store=$sid, tenant=$tid)");
                 $qty = max(1, (int)($item['quantity']??1));
-                if ($prod['stock'] < $qty) throw new \Exception("Insufficient stock for {$prod['name']}");
+                if ((int)$prod['stock'] < $qty) throw new \Exception("Insufficient stock for {$prod['name']}: have {$prod['stock']}, need $qty");
                 $price = (float)($item['price']??$prod['price']); $st = $price*$qty; $subtotal += $st;
                 $saleItems[] = ['product_id'=>$prod['id'],'product_name'=>$prod['name'],'quantity'=>$qty,'price'=>$price,'subtotal'=>$st];
                 Database::query('UPDATE product_stocks SET stock=stock-:q WHERE product_id=:i AND store_id=:s',['q'=>$qty,'i'=>$prod['id'],'s'=>$sid]);
