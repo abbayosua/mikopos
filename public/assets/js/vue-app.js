@@ -100,7 +100,7 @@ const Register = {
 const Dashboard = {
     template: `
     <div>
-      <div class="mb-6"><h2 class="text-2xl font-bold text-gray-800">Dashboard</h2></div>
+      <div class="mb-6 flex items-center justify-between"><h2 class="text-2xl font-bold text-gray-800">Dashboard</h2><button @click="refresh" :disabled="refreshing" class="text-indigo-600 hover:text-indigo-800 text-sm flex items-center gap-1"><i class="fas fa-sync-alt" :class="refreshing ? 'fa-spin' : ''"></i> Refresh</button></div>
       <div v-if="loading" class="flex justify-center py-20"><i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i></div>
       <div v-else>
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -116,24 +116,29 @@ const Dashboard = {
         <div class="bg-white rounded-lg shadow p-4 mt-6"><div class="flex justify-between items-center mb-3"><h3 class="font-semibold text-gray-700">Recent Sales</h3><router-link to="/sales" class="text-indigo-600 text-sm hover:underline">View All</router-link></div><table v-if="stats.recent_sales?.length" class="w-full text-sm"><thead><tr class="text-left text-gray-500 border-b"><th class="pb-2">Invoice</th><th class="pb-2">Customer</th><th class="pb-2">Total</th><th class="pb-2">Date</th><th></th></tr></thead><tbody><tr v-for="s in stats.recent_sales" :key="s.id" class="border-b last:border-0"><td class="py-2">{{ s.invoice_no }}</td><td class="py-2">{{ s.customer_name || 'Walk-in' }}</td><td class="py-2 font-medium">{{ fmt(s.total) }}</td><td class="py-2 text-gray-500">{{ s.created_at }}</td><td><router-link :to="'/sales/'+s.id" class="text-indigo-600 hover:underline">View</router-link></td></tr></tbody></table><p v-else class="text-gray-500 text-sm">No sales yet</p></div>
       </div>
     </div>`,
-    data: () => ({ stats: {}, loading: true }),
-    methods: { fmt: fmtMoney },
-    async created() {
-        // Read from IndexedDB (seeded by sync)
-        try {
-            const products = await db.getAll('products');
-            const customers = await db.getAll('customers');
-            const salesQueue = await db.getAll('sales_queue');
-            this.stats = {
-                product_count: products.length,
-                customer_count: customers.length,
-                low_stock: products.filter(p => p.stock <= p.min_stock).slice(0, 5),
-                today_sales: { count: salesQueue.filter(s => s.synced).length, total: 0 },
-                recent_sales: salesQueue.filter(s => s.synced).slice(-5).reverse(),
-            };
-        } catch(e) {}
-        this.loading = false;
+    data: () => ({ stats: {}, loading: true, refreshing: false }),
+    methods: {
+        fmt: fmtMoney,
+        async refresh() {
+            this.refreshing = true;
+            try {
+                const products = await db.getAll('products');
+                const customers = await db.getAll('customers');
+                const salesQueue = await db.getAll('sales_queue');
+                this.stats = {
+                    product_count: products.length,
+                    customer_count: customers.length,
+                    low_stock: products.filter(p => p.stock <= p.min_stock).slice(0, 5),
+                    today_sales: { count: salesQueue.filter(s => s.synced).length, total: 0 },
+                    recent_sales: salesQueue.filter(s => s.synced).slice(-5).reverse(),
+                };
+                // Also trigger background sync
+                sync.syncNow();
+            } catch(e) {}
+            this.refreshing = false;
+        },
     },
+    async created() { this.refresh(); },
 };
 
 // ── POS (simplified — full offline version later) ──
@@ -440,15 +445,21 @@ const Customers = {
 // ── Sales list ──
 const Sales = {
     template: `
-    <div><h2 class="text-2xl font-bold mb-4">Sales History</h2>
+    <div><div class="flex items-center justify-between mb-4"><h2 class="text-2xl font-bold">Sales History</h2><button @click="refresh" :disabled="refreshing" class="text-indigo-600 hover:text-indigo-800 text-sm flex items-center gap-1"><i class="fas fa-sync-alt" :class="refreshing ? 'fa-spin' : ''"></i> Refresh</button></div>
       <div v-if="loading" class="flex justify-center py-20"><i class="fas fa-spinner fa-pulse text-4xl text-indigo-800"></i></div>
       <div v-else class="bg-white rounded-lg shadow">
         <div class="p-4 border-b flex gap-2"><input type="text" v-model="search" @input="load" placeholder="Search..." class="flex-1 px-3 py-2 border rounded-lg"><input type="date" v-model="from" @change="load" class="px-3 py-2 border rounded-lg"><input type="date" v-model="to" @change="load" class="px-3 py-2 border rounded-lg"></div>
         <table class="w-full text-sm"><thead><tr class="text-left text-gray-500 border-b bg-gray-50"><th class="p-3">Invoice</th><th class="p-3">Date</th><th class="p-3">Customer</th><th class="p-3">Payment</th><th class="p-3">Total</th><th class="p-3">Status</th><th></th></tr></thead><tbody><tr v-for="s in items" :key="s.id" class="border-b hover:bg-gray-50"><td class="p-3 font-medium">{{ s.invoice_no }}</td><td class="p-3">{{ s.created_at }}</td><td class="p-3">{{ s.customer_name || 'Walk-in' }}</td><td class="p-3 capitalize">{{ s.payment_method }}</td><td class="p-3 font-bold">{{ fmt(s.total) }}</td><td class="p-3"><span :class="s.status==='completed'?'bg-green-100 text-green-800':'bg-red-100 text-red-800'" class="px-2 py-1 rounded-full text-xs capitalize">{{ s.status }}</span></td><td><router-link :to="'/sales/'+s.id" class="text-indigo-600 hover:underline">View</router-link></td></tr></tbody></table></div>
     </div>`,
-    data: () => ({ items: [], search: '', from: '', to: '', loading: true }),
+    data: () => ({ items: [], search: '', from: '', to: '', loading: true, refreshing: false }),
     methods: {
         fmt: fmtMoney,
+        async refresh() {
+            this.refreshing = true;
+            await sync.syncNow();
+            await this.load();
+            this.refreshing = false;
+        },
         async load() {
             this.loading = true;
             // Show local sales first
