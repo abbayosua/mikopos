@@ -23,5 +23,7 @@ const apiDelete = (url) => apiFetch(url, { method: 'DELETE' });
 
 const apiJson = async (url, options = {}) => {
     const res = await apiFetch(url, options);
-    return res.json();
+    let text;
+    try { text = await res.text(); } catch(e) { return { success: false, message: 'Network error' }; }
+    try { return JSON.parse(text); } catch(e) { return { success: false, message: 'Invalid response', raw: text }; }
 };

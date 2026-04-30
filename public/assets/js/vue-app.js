@@ -522,14 +522,34 @@ const app = createApp({
         sidebarOpen: true,
         authenticated: !!localStorage.getItem('token'),
         storeName: localStorage.getItem('store_name') || '',
+        storeId: localStorage.getItem('store_id') || null,
+        stores: [],
     }),
     methods: {
         logout() {
             localStorage.removeItem('token');
             localStorage.removeItem('store_id');
             this.authenticated = false;
+            this.storeId = null;
             this.$router.push('/login');
         },
+        async selectStore(s) {
+            const res = await apiPost('/api/stores/switch', { store_id: s.id });
+            const d = await res.json();
+            if (d.success) {
+                localStorage.setItem('store_id', s.id);
+                localStorage.setItem('store_name', s.name);
+                this.storeId = s.id;
+                this.storeName = s.name;
+            }
+        },
+        async fetchStores() {
+            const d = await apiJson('/api/stores/mine');
+            if (d.success) this.stores = d.data;
+        },
+    },
+    async mounted() {
+        if (this.authenticated) await this.fetchStores();
     },
 });
 

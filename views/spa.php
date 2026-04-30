@@ -12,12 +12,29 @@
 </head>
 <body class="bg-gray-100">
     <div id="app">
+        <!-- Auth check: not logged in and not on public page -->
         <div v-if="!authenticated && $route.path !== '/login' && $route.path !== '/register'" class="min-h-screen flex items-center justify-center">
             <div class="text-center">
                 <i class="fas fa-spinner fa-pulse text-4xl text-indigo-800 mb-4"></i>
                 <p class="text-gray-500 text-sm">Redirecting to login...</p>
             </div>
         </div>
+
+        <!-- Store selector: logged in but no store selected -->
+        <div v-else-if="authenticated && !storeId && $route.path !== '/login' && $route.path !== '/register'" class="min-h-screen flex items-center justify-center bg-gray-100">
+            <div class="bg-white rounded-lg shadow-lg p-8 text-center max-w-md">
+                <i class="fas fa-store text-6xl text-indigo-300 mb-4"></i>
+                <h2 class="text-xl font-bold mb-2">Select a Store</h2>
+                <p class="text-gray-500 mb-6">Choose a store to start working.</p>
+                <div class="space-y-2">
+                    <button v-for="s in stores" :key="s.id" @click="selectStore(s)" class="w-full bg-indigo-800 text-white py-3 rounded-lg hover:bg-indigo-900 font-medium">
+                        <i class="fas fa-store mr-2"></i>{{ s.name }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main app layout -->
         <div v-else class="flex h-screen">
             <aside v-show="authenticated" :class="sidebarOpen ? 'w-64' : 'w-16'" class="bg-indigo-800 text-white transition-all duration-300 flex-shrink-0">
                 <div class="p-4 border-b border-indigo-700">
