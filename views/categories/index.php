@@ -70,9 +70,11 @@ function categories() {
         loading: false,
         error: '',
         async load() {
+            const cached = cache.get('categories');
+            if (cached) { this.items = cached; return; }
             const res = await apiFetch('/api/categories');
             const data = await res.json();
-            if (data.success) this.items = data.data;
+            if (data.success) { this.items = data.data; cache.set('categories', data.data, 30 * 60 * 1000); }
         },
         edit(cat) {
             this.editing = true;

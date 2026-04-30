@@ -90,9 +90,13 @@ function customers() {
         async load() {
             const params = new URLSearchParams();
             if (this.search) params.set('search', this.search);
+            if (!this.search) {
+                const cached = cache.get('customers');
+                if (cached) { this.items = cached; return; }
+            }
             const res = await apiFetch('/api/customers?' + params);
             const data = await res.json();
-            if (data.success) this.items = data.data;
+            if (data.success) { this.items = data.data; if (!this.search) cache.set('customers', data.data, 10 * 60 * 1000); }
         },
         edit(c) {
             this.editing = true;

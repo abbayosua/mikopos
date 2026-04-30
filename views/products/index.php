@@ -62,15 +62,22 @@ function products() {
         async load() {
             const params = new URLSearchParams();
             if (this.search) params.set('search', this.search);
+            if (!this.search) {
+                const cached = cache.get('products');
+                if (cached) { this.products = cached; return; }
+            }
             const res = await apiFetch('/api/products?' + params);
             const data = await res.json();
-            if (data.success) this.products = data.data;
+            if (data.success) {
+                this.products = data.data;
+                if (!this.search) cache.set('products', data.data, 5 * 60 * 1000);
+            }
         },
         async remove(id) {
             if (!confirm('Delete this product?')) return;
             const res = await apiFetch('/api/products/' + id, { method: 'DELETE' });
             const data = await res.json();
-            if (data.success) this.load();
+            if (data.success) { cache.remove('products'); this.load(); }
         },
         formatMoney(n) {
             return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(n || 0);

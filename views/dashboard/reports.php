@@ -102,34 +102,45 @@ function reports() {
         lowStock: [],
         recentSales: [],
         async load() {
-            const res = await apiFetch('/api/dashboard/stats');
-            const data = await res.json();
-            if (data.success) {
-                const s = data.data;
-                this.summary = s.today_sales || { count: 0, total: 0 };
-                this.lowStock = s.low_stock || [];
-                this.recentSales = s.recent_sales || [];
+            let stats = cache.get('reportStats');
+            if (!stats) {
+                const res = await apiFetch('/api/dashboard/stats');
+                const data = await res.json();
+                if (data.success) {
+                    stats = data.data;
+                    cache.set('reportStats', stats, 2 * 60 * 1000);
+                }
+            }
+            if (stats) {
+                this.summary = stats.today_sales || { count: 0, total: 0 };
+                this.lowStock = stats.low_stock || [];
+                this.recentSales = stats.recent_sales || [];
             }
 
-            const res2 = await apiFetch('/api/sales?limit=50');
-            const data2 = await res2.json();
-            if (data2.success) {
-                const productMap = {};
-                for (const sale of data2.data) {
-                    const detailRes = await apiFetch('/api/sales/' + sale.id);
-                    const detailData = await detailRes.json();
-                    if (detailData.success && detailData.data.items) {
-                        for (const item of detailData.data.items) {
-                            if (!productMap[item.product_name]) {
-                                productMap[item.product_name] = { product_name: item.product_name, total_qty: 0, total_sales: 0 };
+            let topProductsData = cache.get('topProducts');
+            if (!topProductsData) {
+                const res2 = await apiFetch('/api/sales?limit=50');
+                const data2 = await res2.json();
+                if (data2.success) {
+                    const productMap = {};
+                    for (const sale of data2.data) {
+                        const detailRes = await apiFetch('/api/sales/' + sale.id);
+                        const detailData = await detailRes.json();
+                        if (detailData.success && detailData.data.items) {
+                            for (const item of detailData.data.items) {
+                                if (!productMap[item.product_name]) {
+                                    productMap[item.product_name] = { product_name: item.product_name, total_qty: 0, total_sales: 0 };
+                                }
+                                productMap[item.product_name].total_qty += item.quantity;
+                                productMap[item.product_name].total_sales += parseFloat(item.subtotal);
                             }
-                            productMap[item.product_name].total_qty += item.quantity;
-                            productMap[item.product_name].total_sales += parseFloat(item.subtotal);
                         }
                     }
+                    topProductsData = Object.values(productMap).sort((a, b) => b.total_sales - a.total_sales).slice(0, 10);
+                    cache.set('topProducts', topProductsData, 5 * 60 * 1000);
                 }
-                this.topProducts = Object.values(productMap).sort((a, b) => b.total_sales - a.total_sales).slice(0, 10);
             }
+            this.topProducts = topProductsData || [];
         },
         formatMoney(n) { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(n || 0); }
     }
