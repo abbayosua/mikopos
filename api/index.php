@@ -350,6 +350,14 @@ try {
         ]);
     }
 
+    // === SPA Shell ===
+    elseif ($uri === '/app' && $method === 'GET') {
+        header('Content-Type: text/html; charset=UTF-8');
+        header('Cache-Control: private, max-age=30, stale-while-revalidate=300');
+        require __DIR__ . '/../views/spa.php';
+        exit;
+    }
+
     // === PAGE ROUTES (HTML) ===
     elseif ($method === 'GET' && !str_starts_with($uri, '/api/')) {
         header('Content-Type: text/html; charset=UTF-8');
