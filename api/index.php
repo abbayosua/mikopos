@@ -380,47 +380,43 @@ try {
         $tid = Auth::tenantId(); $uid = Auth::id(); $sid = Auth::storeId();
         if (!$sid) Response::error('No store selected', 400);
         $pdo = Database::getInstance()->getConnection();
-        try { $pdo->beginTransaction(); } catch (\Exception $e) { Response::error('TX: '.$e->getMessage(), 500); }
-        try {
-            $subtotal = 0; $saleItems = [];
-            foreach ($items as $item) {
-                try {
-                    $stmt = $pdo->prepare('SELECT p.id,p.name,p.price,ps.stock FROM products p JOIN product_stocks ps ON ps.product_id=p.id AND ps.store_id=:s WHERE p.id=:i AND p.tenant_id=:t');
-                    $stmt->execute(['i'=>(int)$item['product_id'],'t'=>$tid,'s'=>$sid]);
-                    $prod = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
-                } catch (\Exception $e) { throw new \Exception("SELECT: ".$e->getMessage()); }
-                if (!$prod) throw new \Exception("Product not found");
-                $qty = max(1, (int)($item['quantity']??1));
-                $price = (float)($item['price']??$prod['price']); $st = $price*$qty; $subtotal += $st;
-                $saleItems[] = ['product_id'=>$prod['id'],'product_name'=>$prod['name'],'quantity'=>$qty,'price'=>$price,'subtotal'=>$st];
-                try {
-                    $upd = $pdo->prepare('UPDATE product_stocks SET stock=GREATEST(0, stock-:q) WHERE product_id=:i AND store_id=:s');
-                    $upd->execute(['q'=>$qty,'i'=>$prod['id'],'s'=>$sid]);
-                } catch (\Exception $e) { throw new \Exception("UPDATE: ".$e->getMessage()); }
-            }
-            $disc = (float)($d['discount']??0); $tax = (float)($d['tax']??0);
-            $total = $subtotal-$disc+$tax; $paid = (float)($d['amount_paid']??0); $change = max(0,$paid-$total);
-            $inv = 'INV-'.date('Ymd').'-'.strtoupper(substr(uniqid(),-6));
-            try {
-                $ins = $pdo->prepare("INSERT INTO sales (tenant_id,store_id,user_id,customer_id,invoice_no,subtotal,tax,discount,total,payment_method,amount_paid,change_amount,status,notes) VALUES (:t,:s,:u,:c,:inv,:sub,:tax,:disc,:total,:pm,:paid,:ch,'completed','') RETURNING id");
-                $ins->execute(['t'=>$tid,'s'=>$sid,'u'=>$uid,'c'=>!empty($d['customer_id'])?(int)$d['customer_id']:null,'inv'=>$inv,'sub'=>$subtotal,'tax'=>$tax,'disc'=>$disc,'total'=>$total,'pm'=>$d['payment_method']??'cash','paid'=>$paid,'ch'=>$change]);
-                $saleId = (int) $ins->fetchColumn();
-            } catch (\Exception $e) { throw new \Exception("INSERT sale: ".$e->getMessage()); }
-            foreach ($saleItems as $si) {
-                try {
-                    $i2 = $pdo->prepare("INSERT INTO sale_items (product_id,sale_id,product_name,quantity,price,subtotal) VALUES (:pid,:sid,:pn,:qty,:pr,:sub)");
-                    $i2->execute(['pid'=>$si['product_id'],'sid'=>$saleId,'pn'=>$si['product_name'],'qty'=>$si['quantity'],'pr'=>$si['price'],'sub'=>$si['subtotal']]);
-                } catch (\Exception $e) { throw new \Exception("INSERT item: ".$e->getMessage()); }
-            }
-            $pdo->commit();
-            $s = $pdo->prepare('SELECT s.*,u.name as cashier_name FROM sales s LEFT JOIN users u ON u.id=s.user_id WHERE s.id=:i');
-            $s->execute(['i'=>$saleId]);
-            $sale = $s->fetch(\PDO::FETCH_ASSOC);
-            $sale['items'] = $saleItems; Response::success($sale, 'Sale synced');
-        } catch (\Exception $e) {
-            try { $pdo->rollBack(); } catch (\Exception $r) {}
-            Response::error('Sync: '.$e->getMessage(), 422);
+        $pdo->beginTransaction();
+
+        $subtotal = 0; $saleItems = []; $errors = [];
+        foreach ($items as $i => $item) {
+            $pid = (int)$item['product_id'];
+            $prod = Database::fetch('SELECT id,name,price FROM products WHERE id=:i AND tenant_id=:t', ['i'=>$pid,'t'=>$tid]);
+            if (!$prod) { $errors[] = "Product #{$pid} not found"; continue; }
+
+            $stock = Database::fetch('SELECT stock FROM product_stocks WHERE product_id=:i AND store_id=:s', ['i'=>$pid,'s'=>$sid]);
+            if (!$stock) { $errors[] = "Product #{$pid} has no stock record"; continue; }
+
+            $qty = max(1, (int)($item['quantity']??1));
+            $price = (float)($item['price']??$prod['price']); $st = $price*$qty;
+            $subtotal += $st;
+            $saleItems[] = ['product_id'=>$prod['id'],'product_name'=>$prod['name'],'quantity'=>$qty,'price'=>$price,'subtotal'=>$st];
+            Database::query('UPDATE product_stocks SET stock=GREATEST(0, stock-:q) WHERE product_id=:i AND store_id=:s', ['q'=>$qty,'i'=>$pid,'s'=>$sid]);
         }
+
+        if (empty($saleItems)) {
+            $pdo->rollBack();
+            Response::error('No valid items in sale. Errors: '.implode('; ', $errors), 422);
+        }
+
+        $disc = (float)($d['discount']??0); $tax = (float)($d['tax']??0);
+        $total = $subtotal-$disc+$tax; $paid = (float)($d['amount_paid']??0); $change = max(0,$paid-$total);
+        $inv = 'INV-'.date('Ymd').'-'.strtoupper(substr(uniqid(),-6));
+
+        $saleId = Database::insert('sales', ['tenant_id'=>$tid,'store_id'=>$sid,'user_id'=>$uid,'customer_id'=>!empty($d['customer_id'])?(int)$d['customer_id']:null,'invoice_no'=>$inv,'subtotal'=>$subtotal,'tax'=>$tax,'discount'=>$disc,'total'=>$total,'payment_method'=>$d['payment_method']??'cash','amount_paid'=>$paid,'change_amount'=>$change,'status'=>'completed','notes'=>'']);
+        foreach ($saleItems as $si) { $si['sale_id'] = $saleId; Database::insert('sale_items', $si); }
+
+        $pdo->commit();
+
+        $sale = Database::fetch('SELECT s.*,u.name as cashier_name FROM sales s LEFT JOIN users u ON u.id=s.user_id WHERE s.id=:i', ['i'=>$saleId]);
+        $sale['items'] = $saleItems;
+        $resp = ['success'=>true, 'message'=>'Sale synced', 'data'=>$sale];
+        if ($errors) $resp['warnings'] = $errors;
+        Response::json($resp);
     }
     elseif ($uri === '/api/sync/status' && $method === 'GET') {
         auth();
